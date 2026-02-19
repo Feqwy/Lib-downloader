@@ -5,6 +5,10 @@ downloads/
 
 *.log
 *.tmp
+*.spec
+
+build/
+dist/
 
 .vscode/
 .idea/

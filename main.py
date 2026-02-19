@@ -4,6 +4,7 @@ import socket
 import subprocess
 import time
 import signal
+import threading
 from pathlib import Path
 from config import Config
 from downloader import ChapterDownloader
@@ -11,6 +12,8 @@ import csv
 from typing import List, Tuple, Dict, Any, Optional
 
 _server_process: Optional[subprocess.Popen] = None
+_server_thread: Optional[threading.Thread] = None
+_server_started = threading.Event()
 
 
 def _parse_yes_no(value: str, default: str = "n") -> bool:
@@ -50,9 +53,71 @@ def _is_server_running(host: str = "127.0.0.1", port: int = 8080) -> bool:
         return False
 
 
+def _run_server_thread(server_log_path: str):
+    import logging
+    from aiohttp import web
+    
+    file_handler = logging.FileHandler(server_log_path, mode='a', encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
+    
+    from server import app, logger as server_logger
+    
+    server_logger.addHandler(file_handler)
+    server_logger.setLevel(logging.INFO)
+    
+    async def run_app():
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 8080)
+        await site.start()
+        server_logger.info("Server ready. Supports: v2.shlib.life, mangalib.me, mangalib.org, ranobelib.me")
+        _server_started.set()
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await runner.cleanup()
+    
+    try:
+        asyncio.run(run_app())
+    except Exception as e:
+        logging.error(f"Server thread error: {e}")
+        _server_started.set()
+    finally:
+        file_handler.close()
+
+
 def _start_background_server() -> Optional[subprocess.Popen]:
+    global _server_thread
+    
     server_log = Path("server.log")
     script_dir = Path(__file__).parent
+
+    _server_started.clear()
+
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        try:
+            with open(server_log, "a", encoding="utf-8") as log_file:
+                log_file.write(f"\n{'='*50}\n")
+                log_file.write(f"Server started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                log_file.write(f"{'='*50}\n")
+
+            _server_thread = threading.Thread(target=_run_server_thread, args=(str(server_log),), daemon=True)
+            _server_thread.start()
+            
+            if _server_started.wait(timeout=10):
+                print("Server started successfully in background thread")
+                return None
+            else:
+                print("Warning: Server thread failed to start within timeout. Check server.log")
+                return None
+                
+        except Exception as e:
+            print(f"Error starting server thread: {e}")
+            return None
+    
     server_script = script_dir / "server.py"
     
     if not server_script.exists():
@@ -89,7 +154,8 @@ def _start_background_server() -> Optional[subprocess.Popen]:
 
 
 def _stop_background_server():
-    global _server_process
+    global _server_process, _server_thread
+    
     if _server_process is not None:
         try:
             _server_process.terminate()
@@ -101,12 +167,18 @@ def _stop_background_server():
             except Exception:
                 pass
         _server_process = None
+    
+    _server_thread = None
 
 
 def _open_log_viewer():
     script_dir = Path(__file__).parent
-    viewer_script = script_dir / "log_viewer.py"
     
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        viewer_script = Path(sys._MEIPASS) / "log_viewer.py"
+    else:
+        viewer_script = script_dir / "log_viewer.py"
+
     if not viewer_script.exists():
         print(f"Error: log_viewer.py not found at {viewer_script}")
         return
