@@ -56,15 +56,9 @@ def _is_server_running(host: str = "127.0.0.1", port: int = 8080) -> bool:
 def _run_server_thread(server_log_path: str):
     import logging
     from aiohttp import web
-    
-    file_handler = logging.FileHandler(server_log_path, mode='a', encoding='utf-8')
-    file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
-    
+
     from server import app, logger as server_logger
-    
-    server_logger.addHandler(file_handler)
-    server_logger.setLevel(logging.INFO)
-    
+
     async def run_app():
         runner = web.AppRunner(app)
         await runner.setup()
@@ -79,75 +73,60 @@ def _run_server_thread(server_log_path: str):
             pass
         finally:
             await runner.cleanup()
-    
+
     try:
         asyncio.run(run_app())
     except Exception as e:
         logging.error(f"Server thread error: {e}")
         _server_started.set()
-    finally:
-        file_handler.close()
 
 
 def _start_background_server() -> Optional[subprocess.Popen]:
     global _server_thread
-    
-    server_log = Path("server.log")
+
     script_dir = Path(__file__).parent
 
     _server_started.clear()
 
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         try:
-            with open(server_log, "a", encoding="utf-8") as log_file:
-                log_file.write(f"\n{'='*50}\n")
-                log_file.write(f"Server started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                log_file.write(f"{'='*50}\n")
-
-            _server_thread = threading.Thread(target=_run_server_thread, args=(str(server_log),), daemon=True)
+            _server_thread = threading.Thread(target=_run_server_thread, args=("",), daemon=True)
             _server_thread.start()
-            
+
             if _server_started.wait(timeout=10):
                 print("Server started successfully in background thread")
                 return None
             else:
-                print("Warning: Server thread failed to start within timeout. Check server.log")
+                print("Warning: Server thread failed to start within timeout")
                 return None
-                
+
         except Exception as e:
             print(f"Error starting server thread: {e}")
             return None
-    
+
     server_script = script_dir / "server.py"
-    
+
     if not server_script.exists():
         print(f"Warning: server.py not found at {server_script}")
         return None
-    
+
     try:
         CREATE_NO_WINDOW = 0x08000000
-        with open(server_log, "a", encoding="utf-8") as log_file:
-            log_file.write(f"\n{'='*50}\n")
-            log_file.write(f"Server started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            log_file.write(f"{'='*50}\n")
-        
         process = subprocess.Popen(
             [sys.executable, str(server_script)],
-            stdout=open(server_log, "a", encoding="utf-8"),
-            stderr=subprocess.STDOUT,
             creationflags=CREATE_NO_WINDOW,
             cwd=str(script_dir)
         )
-        
+
         time.sleep(2)
-        
+
         if _is_server_running():
             print(f"Server started successfully (PID: {process.pid})")
             return process
         else:
-            print("Warning: Server may have failed to start. Check server.log")
+            print("Warning: Server may have failed to start")
             return None
-            
+
     except Exception as e:
         print(f"Error starting server: {e}")
         return None
@@ -173,25 +152,24 @@ def _stop_background_server():
 
 def _open_log_viewer():
     script_dir = Path(__file__).parent
-    
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        viewer_script = Path(sys._MEIPASS) / "log_viewer.py"
-    else:
-        viewer_script = script_dir / "log_viewer.py"
 
-    if not viewer_script.exists():
-        print(f"Error: log_viewer.py not found at {viewer_script}")
-        return
-    
     try:
         import subprocess
-        subprocess.Popen(
-            ["python", str(viewer_script.absolute())],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-            cwd=str(script_dir)
-        )
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            subprocess.Popen(
+                [sys.executable, "--log-viewer"],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                cwd=str(script_dir)
+            )
+        else:
+            viewer_script = script_dir / "log_viewer.py"
+            subprocess.Popen(
+                ["python", str(viewer_script.absolute())],
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                cwd=str(script_dir)
+            )
         print("Log viewer opened in new window.")
-        
+
     except Exception as e:
         print(f"Error opening log viewer: {e}")
 
@@ -585,7 +563,14 @@ async def main():
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
-    
+
+    # Check if running in log viewer mode (for frozen executable)
+    if "--log-viewer" in sys.argv:
+        # Run log viewer directly
+        from log_viewer import main as log_viewer_main
+        log_viewer_main()
+        sys.exit(0)
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

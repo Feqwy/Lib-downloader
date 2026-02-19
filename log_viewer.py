@@ -1,56 +1,61 @@
-import time
-import codecs
+import asyncio
+import aiohttp
 from pathlib import Path
 import sys
 
-LOG_FILE = Path("server.log")
+SERVER_URL = "http://127.0.0.1:8080/logs"
 
-def decode_unicode_escapes(text):
+def _configure_utf8_console():
     try:
-        return codecs.decode(text, 'unicode_escape')
-    except:
-        return text
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
-def main():
+async def run_log_viewer():
+    _configure_utf8_console()
+    
     print("=" * 60)
     print("MangaLib Server - Real-time Log Viewer")
     print("Press Ctrl+C to close")
     print("=" * 60)
     print()
-    
-    if not LOG_FILE.exists():
-        print("Waiting for server.log to be created...")
-        while not LOG_FILE.exists():
-            time.sleep(1)
-    
-    last_size = LOG_FILE.stat().st_size
-    
-    with open(LOG_FILE, "r", encoding="utf-8") as f:
-        f.seek(0, 2)
-        
+    print("Connecting to server...")
+
+    last_logs = set()
+
+    async with aiohttp.ClientSession() as session:
         while True:
             try:
-                line = f.readline()
-                if line:
-                    decoded = decode_unicode_escapes(line.rstrip())
-                    print(decoded, flush=True)
-                else:
-                    time.sleep(0.3)
-                    try:
-                        current_size = LOG_FILE.stat().st_size
-                        if current_size < last_size:
-                            f.seek(0)
-                        last_size = current_size
-                    except FileNotFoundError:
-                        pass
-            except KeyboardInterrupt:
-                break
+                async with session.get(SERVER_URL, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logs = data.get("logs", [])
+
+                        current_logs = set(logs)
+                        new_logs = [log for log in logs if log not in last_logs]
+
+                        for log in new_logs:
+                            print(log, flush=True)
+
+                        last_logs = current_logs
+                    else:
+                        print(f"Server returned status: {response.status}", flush=True)
+
+            except aiohttp.ClientError as e:
+                print(f"Waiting for server... ({type(e).__name__})", flush=True)
             except Exception as e:
                 print(f"Error: {e}", flush=True)
-                time.sleep(1)
 
-if __name__ == "__main__":
+            await asyncio.sleep(1)
+
+def main():
     try:
-        main()
+        asyncio.run(run_log_viewer())
     except KeyboardInterrupt:
         pass
+    except Exception as e:
+        print(f"\nLog viewer error: {e}")
+
+if __name__ == "__main__":
+    main()

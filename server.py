@@ -4,16 +4,31 @@ import asyncio
 import aiohttp
 import logging
 import csv
+import json
 from datetime import datetime
 from aiohttp import web
 from pathlib import Path
 from dotenv import load_dotenv
+from collections import deque
+from aiohttp import WSMsgType
+
+# Хранилище логов в памяти (последние 200 сообщений)
+log_buffer = deque(maxlen=200)
+
+class MemoryLogHandler(logging.Handler):
+    def emit(self, record):
+        msg = self.format(record)
+        log_buffer.append(msg)
+
+# Отключаем логи доступа aiohttp (чтобы не спамили запросы /logs)
+logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
 # Настройка логов
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
+    datefmt='%H:%M:%S',
+    handlers=[MemoryLogHandler()]
 )
 logger = logging.getLogger("MangaServer")
 
@@ -328,6 +343,43 @@ async def add_cors(app, res):
 app.on_response_prepare.append(add_cors)
 app.router.add_post('/check', handle_check)
 
+# Endpoint для WebSocket логов
+async def handle_logs_ws(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    
+    # Отправляем текущий буфер
+    for msg in log_buffer:
+        await ws.send_str(json.dumps({"type": "log", "message": msg}))
+    
+    # Подписываемся на новые логи
+    last_pos = len(log_buffer)
+    try:
+        while True:
+            # Проверяем новые сообщения
+            while last_pos < len(log_buffer):
+                await ws.send_str(json.dumps({"type": "log", "message": log_buffer[last_pos]}))
+                last_pos += 1
+            
+            # Ждем немного перед следующей проверкой
+            try:
+                msg = await asyncio.wait_for(ws.receive(), timeout=0.5)
+                if msg.type == WSMsgType.ERROR:
+                    break
+            except asyncio.TimeoutError:
+                pass
+    except Exception:
+        pass
+    
+    return ws
+
+# Endpoint для получения логов (HTTP polling)
+async def handle_logs(request):
+    return web.json_response({"logs": list(log_buffer)}, headers={"X-Log-Endpoint": "true"})
+
+app.router.add_get('/logs', handle_logs)
+app.router.add_get('/logs/ws', handle_logs_ws)
+
 if __name__ == "__main__":
     logger.info("Сервер готов. Поддерживаются: v2.shlib.life, mangalib.me, mangalib.org и ranobelib.me")
-    web.run_app(app, port=8080)
+    web.run_app(app, port=8080, access_log=None)

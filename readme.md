@@ -151,19 +151,6 @@ downloads/
 
 ---
 
-## Сборка из исходников
-
-### Локальная сборка (Windows)
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --name "MangaLibDownloader" main.py
-```
-
-Готовый `.exe` будет в папке `dist/`.
-
----
-
 ## Troubleshooting
 
 ### Ошибка 429 (Too Many Requests)
@@ -193,8 +180,8 @@ pyinstaller --onefile --name "MangaLibDownloader" main.py
 ### Логи не отображаются
 
 **Решение:**
-- Проверьте файл `server.log` в папке приложения
-- Убедитесь, что сервер запущен (режим 3 открывает логи)
+- Убедитесь, что сервер запущен (пункт 3 открывает логи в отдельном окне)
+- Проверьте, что порт 8080 не занят другим приложением
 
 ---
 
