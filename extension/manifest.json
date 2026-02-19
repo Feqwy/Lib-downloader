@@ -16,8 +16,7 @@
     "https://mangalib.org/*",
     "https://ranobelib.me/*",
     "https://hapi.hentaicdn.org/*",
-    "https://api.cdnlibs.org/*",
-    "https://api.ranobelib.me/*"
+    "https://api.cdnlibs.org/*"
   ],
   "content_scripts": [
     {

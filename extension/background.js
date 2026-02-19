@@ -6,7 +6,7 @@ chrome.runtime.onInstalled.addListener(() => {
 const targetUrls = [
   "*://hapi.hentaicdn.org/api/*", // Shlib
   "*://api.cdnlibs.org/api/*",    // Mangalib
-  "*://api.ranobelib.me/api/*"    // RanobeLib (if different API)
+  "*://api.cdnlibs.org/api/*"    // RanobeLib (if different API)
 ];
 
 chrome.webRequest.onBeforeSendHeaders.addListener(
