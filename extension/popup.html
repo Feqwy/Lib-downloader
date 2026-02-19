@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MangaLib Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Lib Downloader</h1>
+      <span class="version">v1.0</span>
+    </header>
+
+    <div class="status-bar">
+      <span class="status-label">Статус:</span>
+      <span id="status" class="status-value ready">Готов</span>
+      <span class="divider">•</span>
+      <span class="status-label">Найдено:</span>
+      <span id="slugCount" class="status-count">0</span>
+    </div>
+
+    <div class="server-status-bar">
+      <span class="status-label">Сервер:</span>
+      <span id="serverStatus" class="status-value unknown">Проверка...</span>
+      <span class="server-url" id="serverUrlDisplay"></span>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" class="btn btn-primary">Начать сбор</button>
+      <button id="stopBtn" class="btn" disabled>Стоп</button>
+      <button id="resetBtn" class="btn btn-icon" title="Сбросить собранные slug">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="1 4 1 10 7 10"/>
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="settings">
+      <div class="settings-header" id="toggleSettings">
+        <span>Настройки</span>
+        <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+
+      <div id="settingsContent" class="settings-content">
+        <div class="form-group">
+          <label for="serverUrl" class="form-label">Сервер</label>
+          <input type="text" id="serverUrl" class="form-input" value="http://localhost:8080">
+        </div>
+
+        <div class="form-group">
+          <label for="domain" class="form-label">Домен</label>
+          <select id="domain" class="form-select">
+            <option value="mangalib.me">mangalib.me</option>
+            <option value="mangalib.org">mangalib.org</option>
+            <option value="v2.shlib.life">v2.shlib.life</option>
+            <option value="ranobelib.me">ranobelib.me</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="mode" class="form-label">Режим проверки</label>
+          <select id="mode" class="form-select">
+            <option value="server_only">Только сервер</option>
+            <option value="check_local">Проверка локально</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="pathGroup" style="display: none;">
+          <label for="localPath" class="form-label">Путь к папке</label>
+          <input type="text" id="localPath" class="form-input" placeholder="C:\path\to\manga\folder">
+        </div>
+
+        <div class="form-group" id="tokenGroup" style="display: none;">
+          <label for="token" class="form-label">Токен (для Shlib)</label>
+          <div class="input-group">
+            <input type="text" id="token" class="form-input" placeholder="Bearer токен из cookies/localStorage">
+            <button id="extractTokenBtn" class="btn btn-small">Взять</button>
+          </div>
+        </div>
+
+        <button id="sendBtn" class="btn btn-success" disabled>Отправить на сервер</button>
+      </div>
+    </div>
+
+    <div class="results" id="resultsSection" style="display: none;">
+      <div class="results-header">
+        <span>Результаты</span>
+        <button id="clearResults" class="btn btn-icon" title="Очистить результаты">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div id="results" class="results-content"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

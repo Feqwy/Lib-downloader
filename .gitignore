@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+
+downloads/
+
+*.log
+*.tmp
+
+.vscode/
+.idea/
+.env
+chapter_checker_log.csv
+check.py
+ch.py
