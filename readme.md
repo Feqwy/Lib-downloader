@@ -1,6 +1,6 @@
 # MangaLib Downloader v1.0
 
-Асинхронный загрузчик манги с **Lib-сайтов** (MangaLib, SlashLib, Hlib и RanobeLib) с автоматической проверкой обновлений и генерацией метаданных для Komga/Mylar.
+Асинхронный загрузчик манги с **Lib-сайтов** (MangaLib, SlashLib, HentaiLib и RanobeLib) с автоматической проверкой обновлений и генерацией метаданных для Komga/Mylar.
 
 ## Особенности
 
@@ -92,14 +92,15 @@ python main.py
 |----------|-----|-----------------|
 | **MangaLib** | mangalib.me | Нет |
 | **SlashLib** | v2.shlib.life | Да (Bearer Token) |
-| **RanobeLib** | ranobelib.me | Нет (текстовые главы) |
+| **HentaiLib** | hentailib.me | Да (Bearer Token) |
+| **RanobeLib** | ranobelib.me | Нет |
 
-### Получение токена для SlashLib
+### Получение токена для SlashLib и HentaiLib
 
 1. Откройте расширение в браузере
-2. Зайдите на `v2.shlib.life`
+2. Зайдите на `v2.shlib.life` или `hentailib.me`
 3. Скопируйте Bearer Token из расширения
-4. Вставьте токен при выборе SlashLib в настройках
+4. Вставьте токен при выборе SlashLib/HentaiLib в настройках
 
 ---
 
@@ -216,7 +217,7 @@ mangalib-downloader/
 ## Примечания
 
 - При высоких значениях параллельности возможны блокировки по IP (429)
-- Для корректной работы SlashLib требуется действительный Bearer Token
+- Для корректной работы SlashLib и HentaiLib требуется действительный Bearer Token
 - RanobeLib загружает текстовые главы в формате HTML/TXT (без изображений)
 
 ---
