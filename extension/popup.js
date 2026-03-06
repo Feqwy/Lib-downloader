@@ -59,6 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
       domainEl.value = 'mangalib.org';
     } else if (url.includes('ranobelib.me')) {
       domainEl.value = 'ranobelib.me';
+    } else if (url.includes('hentailib.me')) {
+      domainEl.value = 'hentailib.me';
     } else if (url.includes('mangalib.me')) {
       domainEl.value = 'mangalib.me';
     }
@@ -66,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkTokenVisibility() {
-    if (domainEl.value === 'v2.shlib.life') {
+    if (domainEl.value === 'v2.shlib.life' || domainEl.value === 'hentailib.me') {
       tokenGroup.style.display = 'block';
     } else {
       tokenGroup.style.display = 'none';
@@ -102,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      const isShlib = currentTab.url && currentTab.url.includes('shlib.life');
+      const isShlib = currentTab.url && (currentTab.url.includes('shlib.life') || currentTab.url.includes('hentailib.me'));
 
       if (isShlib) {
         showNotification('Автоматическая перезагрузка страницы для захвата токена...', 'info');
@@ -188,10 +190,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const isSupported = url.includes('mangalib.me') ||
                        url.includes('mangalib.org') ||
                        url.includes('v2.shlib.life') ||
-                       url.includes('ranobelib.me');
+                       url.includes('ranobelib.me') ||
+                       url.includes('hentailib.me');
 
     if (!isSupported) {
-      showNotification('Ошибка: Перейдите на поддерживаемую страницу (mangalib.me, ranobelib.me и т.д.)', 'error');
+      showNotification('Ошибка: Перейдите на поддерживаемую страницу (mangalib.me, ranobelib.me, hentailib.me и т.д.)', 'error');
       return;
     }
 
@@ -332,9 +335,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const storageData = await chrome.storage.local.get(['captured_token', 'extractedToken']);
       let token = tokenEl.value.trim() || storageData.captured_token || storageData.extractedToken || null;
 
-      const isShlib = domain === 'v2.shlib.life';
+      const isShlib = domain === 'v2.shlib.life' || domain === 'hentailib.me';
       if (isShlib && !token) {
-        showNotification('Для Shlib нужен токен! Обновите страницу (F5), затем нажмите "Взять".', 'error');
+        showNotification('Для этого домена нужен токен! Обновите страницу (F5), затем нажмите "Взять".', 'error');
         sendBtn.disabled = false;
         sendBtn.textContent = 'Отправить на сервер';
         return;

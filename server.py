@@ -56,6 +56,10 @@ CONFIGS = {
     "ranobelib.me": {
         "api": "https://api.cdnlibs.org/api/manga",
         "referer": "https://ranobelib.me/"
+    },
+    "hentailib.me": {
+        "api": "https://hapi.hentaicdn.org/api/manga",
+        "referer": "https://hentailib.me/"
     }
 }
 
@@ -249,14 +253,15 @@ async def handle_check(request):
             return web.json_response([])
 
         current_config = CONFIGS.get(domain, CONFIGS["mangalib.me"])
-        
+
         is_shlib = "shlib.life" in domain
+        is_hentailib = "hentailib.me" in domain
         is_ranobelib = "ranobelib.me" in domain
-        
+
         # Блокируем запрос если токена нет
-        if is_shlib and not client_token:
+        if (is_shlib or is_hentailib) and not client_token:
             logger.error(f"Ошибка: Для домена {domain} обязателен токен!")
-            return web.json_response({"error": "Токен не найден. Обновите страницу Shlib (F5)!"}, status=401)
+            return web.json_response({"error": "Токен не найден. Обновите страницу (F5)!"}, status=401)
         
         if is_ranobelib:
             logger.info(f"Режим: {domain.upper()} (Текстовые главы; без токена)")
@@ -381,5 +386,5 @@ app.router.add_get('/logs', handle_logs)
 app.router.add_get('/logs/ws', handle_logs_ws)
 
 if __name__ == "__main__":
-    logger.info("Сервер готов. Поддерживаются: v2.shlib.life, mangalib.me, mangalib.org и ranobelib.me")
+    logger.info("Сервер готов. Поддерживаются: v2.shlib.life, mangalib.me, mangalib.org, ranobelib.me и hentailib.me")
     web.run_app(app, port=8080, access_log=None)

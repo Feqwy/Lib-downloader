@@ -64,7 +64,7 @@ def _run_server_thread(server_log_path: str):
         await runner.setup()
         site = web.TCPSite(runner, '127.0.0.1', 8080)
         await site.start()
-        server_logger.info("Server ready. Supports: v2.shlib.life, mangalib.me, mangalib.org, ranobelib.me")
+        server_logger.info("Server ready. Supports: v2.shlib.life, mangalib.me, mangalib.org, ranobelib.me, hentailib.me")
         _server_started.set()
         try:
             while True:
@@ -270,8 +270,9 @@ def prompt_batch_config() -> Config:
     print(f"  1. MangaLib (mangalib.me)")
     print(f"  2. SlashLib (v2.shlib.life)")
     print(f"  3. RanobeLib (ranobelib.me)")
-    
-    api_choice = input(f"\nВаш выбор [1-3, по умолчанию 1]: ").strip() or "1"
+    print(f"  4. HentaiLib (hentailib.me)")
+
+    api_choice = input(f"\nВаш выбор [1-4, по умолчанию 1]: ").strip() or "1"
 
     auth_token: Optional[str] = None
     site_type = "mangalib"
@@ -292,6 +293,15 @@ def prompt_batch_config() -> Config:
         default_referer = "https://ranobelib.me/"
         site_type = "ranobelib"
         _print_info("Текстовые главы, без изображений")
+
+    elif api_choice == "4":
+        _print_info("Выбран API HentaiLib")
+        default_api = "https://hapi.hentaicdn.org/api/manga"
+        default_image_host = "https://img3.hentaicdn.org"
+        default_referer = "https://hentailib.me/"
+        site_type = "hentailib"
+        _print_info("Требуется Bearer Token (можно получить через расширение)")
+        auth_token = input(f"Токен [Enter — без токена]: ").strip() or None
 
     else:
         _print_info("Выбран API MangaLib")
@@ -356,6 +366,7 @@ def prompt_user_config() -> Config:
 
     is_slash = "v2.shlib.life" in manga_url
     is_ranobelib = "ranobelib.me" in manga_url
+    is_hentailib = "hentailib.me" in manga_url
 
     auth_token: Optional[str] = None
     site_type = "mangalib"
@@ -366,6 +377,15 @@ def prompt_user_config() -> Config:
         default_image_host = "https://img3.mixlib.me"
         default_referer = "https://v2.shlib.life/"
         site_type = "shlib"
+        _print_info("Требуется Bearer Token (можно получить через расширение)")
+        auth_token = input(f"Токен [Enter — без токена]: ").strip() or None
+
+    elif is_hentailib:
+        _print_info("Обнаружена ссылка на HentaiLib")
+        default_api = "https://hapi.hentaicdn.org/api/manga"
+        default_image_host = "https://img3.hentaicdn.org"
+        default_referer = "https://hentailib.me/"
+        site_type = "hentailib"
         _print_info("Требуется Bearer Token (можно получить через расширение)")
         auth_token = input(f"Токен [Enter — без токена]: ").strip() or None
 

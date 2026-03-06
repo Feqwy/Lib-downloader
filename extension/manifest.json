@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lib Downloader",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Собирает slug манги и ранобэ с динамически загружаемых страниц и отправляет их на локальный сервер",
   "permissions": [
     "storage",
@@ -15,6 +15,7 @@
     "https://mangalib.me/*",
     "https://mangalib.org/*",
     "https://ranobelib.me/*",
+    "https://hentailib.me/*",
     "https://hapi.hentaicdn.org/*",
     "https://api.cdnlibs.org/*"
   ],
@@ -24,7 +25,8 @@
         "https://v2.shlib.life/*",
         "https://mangalib.me/*",
         "https://mangalib.org/*",
-        "https://ranobelib.me/*"
+        "https://ranobelib.me/*",
+        "https://hentailib.me/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

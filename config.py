@@ -23,7 +23,11 @@ class Config:
     referer: str = "https://mangalib.me/"
     auth_token: Optional[str] = None
     site_type: str = "mangalib"
-    
+
     @property
     def is_ranobelib(self) -> bool:
         return self.site_type == "ranobelib"
+
+    @property
+    def is_hentailib(self) -> bool:
+        return self.site_type == "hentailib"
