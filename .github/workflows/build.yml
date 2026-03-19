@@ -23,7 +23,7 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --name "MangaLibDownloader-Windows" --add-data "server.py;." --add-data "log_viewer.py;." main.py
+          pyinstaller --onefile --name "MangaLibDownloader-Windows" --add-data "server.py;." --add-data "log_viewer.py;." --add-data "utils.py;." main.py
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
@@ -48,7 +48,7 @@ jobs:
 
       - name: Build Binary
         run: |
-          pyinstaller --onefile --name "MangaLibDownloader-Linux" --add-data "server.py:." --add-data "log_viewer.py:." main.py
+          pyinstaller --onefile --name "MangaLibDownloader-Linux" --add-data "server.py:." --add-data "log_viewer.py:." --add-data "utils.py:." main.py
 
       - name: Upload Linux Binary
         uses: actions/upload-artifact@v4
@@ -73,7 +73,7 @@ jobs:
 
       - name: Build Binary
         run: |
-          pyinstaller --onefile --name "MangaLibDownloader-macOS" --add-data "server.py:." --add-data "log_viewer.py:." main.py
+          pyinstaller --onefile --name "MangaLibDownloader-macOS" --add-data "server.py:." --add-data "log_viewer.py:." --add-data "utils.py:." main.py
 
       - name: Upload macOS Binary
         uses: actions/upload-artifact@v4
