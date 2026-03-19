@@ -1,4 +1,4 @@
-# MangaLib Downloader v1.0
+# MangaLib Downloader v1.2
 
 Асинхронный загрузчик манги с **Lib-сайтов** (MangaLib, SlashLib, HentaiLib и RanobeLib) с автоматической проверкой обновлений и генерацией метаданных для Komga/Mylar.
 

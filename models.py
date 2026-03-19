@@ -4,9 +4,9 @@ from typing import Optional, List, Union
 
 @dataclass
 class ChapterInfo:
-    number: Union[int, float]  # теперь поддерживает дробные главы
+    number: Union[int, float]
     number_str: str
-    index: int                 # порядковый номер главы в серии
+    index: int
     volume: int
     name: str
     pages_count: int

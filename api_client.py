@@ -1,38 +1,48 @@
 import asyncio
-import aiohttp
 import random
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Tuple
+from typing import Optional, Dict, Any, List, Union
+
+import aiohttp
 
 from config import Config
 from colors import Colors
 from models import ChapterInfo
+from utils import parse_chapter_number, parse_float
 
 
+# Асинхронный клиент для работы с API Lib-сайтов.
+# Поддерживает: MangaLib, SlashLib, RanobeLib, HentaiLib.
 class MangaAPIClient:
+    DEFAULT_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (iPad; CPU OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.7444.46 Mobile/15E148 Safari/604.1",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
     def __init__(self, cfg: Config):
+        # Инициализирует клиент.
+        # cfg
         self.cfg = cfg
         self._session: Optional[aiohttp.ClientSession] = None
-        # Кэшированные структуры
-        self._chapters_map: Dict[str, Dict[float, int | float]] = {}
+        
+        # Кэш данных
+        self._chapters_map: Dict[str, Dict[float, int]] = {}
         self._series_cache: Dict[str, Dict[str, Any]] = {}
-        self._full_pool_cache: Dict[str, List[Dict[str, Any]]] = {} # Кэш для всех сырых данных глав
+        self._full_pool_cache: Dict[str, List[Dict[str, Any]]] = {}
+        
+        # Заголовки
         self._headers = {
-            "User-Agent": "Mozilla/5.0 (iPad; CPU OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.7444.46 Mobile/15E148 Safari/604.1",
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": self.cfg.referer, # Используем реферер из конфига
+            **self.DEFAULT_HEADERS,
+            "Referer": self.cfg.referer,
             "Origin": self.cfg.referer.rstrip("/")
         }
-
-        # Добавляем Bearer Token, если он есть
+        
         if self.cfg.auth_token:
             self._headers["Authorization"] = f"Bearer {self.cfg.auth_token}"
 
     async def __aenter__(self):
         conn = aiohttp.TCPConnector(limit=self.cfg.max_concurrent_images * 2)
-        # Создаем сессию сразу с нужными хедерами
         self._session = aiohttp.ClientSession(connector=conn, headers=self._headers)
         await self._warm_up_session()
         return self
@@ -41,52 +51,69 @@ class MangaAPIClient:
         if self._session:
             await self._session.close()
 
-    async def _warm_up_session(self):
-        # Делаем легкий запрос к рефереру, чтобы прогреть соединение
+    async def _warm_up_session(self) -> None:
+        # Прогревает сессию легким запросом к рефереру.
         try:
             async with self._session.get(self.cfg.referer, timeout=6):
                 pass
         except Exception:
             pass
 
-    @staticmethod
-    def _parse_chapter_number(number: Any) -> Optional[Union[int, float]]:
-        if number is None:
-            return None
-        try:
-            return int(number)
-        except ValueError:
-            try:
-                return float(str(number).replace(',', '.'))
-            except (ValueError, TypeError):
-                return None
-
     async def fetch_full_chapter_pool(self, slug: str) -> List[Dict[str, Any]]:
+        # Получает полный список глав для тайтла.
         if slug in self._full_pool_cache:
             return self._full_pool_cache[slug]
 
-        # Используем api_base из конфига
         url = f"{self.cfg.api_base}/{slug}/chapters"
+        
         try:
             data = await self._get_json(url, retries=4)
-            # API может вернуть:
-            # - dict { "data": [...] } (cdnlibs)
-            # - dict { "items"/"chapters": [...] } (варианты)
-            # - list [...] (некоторые реализации)
-            items: List[Dict[str, Any]] = []
-            if isinstance(data, list):
-                items = [x for x in data if isinstance(x, dict)]
-            elif isinstance(data, dict):
-                for key in ("data", "items", "chapters"):
-                    val = data.get(key)
-                    if isinstance(val, list):
-                        items = [x for x in val if isinstance(x, dict)]
-                        break
+            items = self._extract_items_from_response(data)
             self._full_pool_cache[slug] = items
             return items
         except Exception as e:
             print(Colors.error(f"Не удалось получить список глав: {e}"))
             return []
+
+    def _extract_items_from_response(self, data: Any) -> List[Dict[str, Any]]:
+        # Извлекает список элементов из ответа API.
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        
+        if isinstance(data, dict):
+            for key in ("data", "items", "chapters"):
+                val = data.get(key)
+                if isinstance(val, list):
+                    return [x for x in val if isinstance(x, dict)]
+        
+        return []
+
+    def _build_chapters_map_from_items(
+        self,
+        items: List[Dict[str, Any]],
+    ) -> Dict[float, int]:
+        # Преобразует список элементов /chapters в карту {chapter_number: volume}.
+        mapping: Dict[float, int] = {}
+
+        for item in items:
+            chapter_num = item.get("number")
+            volume_num = item.get("volume")
+
+            if chapter_num is None or volume_num is None:
+                continue
+
+            chapter_float = parse_float(str(chapter_num))
+            if chapter_float is None:
+                continue
+
+            try:
+                volume_int = int(volume_num)
+            except (ValueError, TypeError):
+                continue
+
+            mapping[chapter_float] = volume_int
+
+        return mapping
 
     async def to_chapter_info_list(
         self,
@@ -96,20 +123,35 @@ class MangaAPIClient:
         extra: List[float]
     ) -> List[ChapterInfo]:
         full_data = await self.fetch_full_chapter_pool(slug)
-        
+
         chapter_info_list: List[ChapterInfo] = []
-        # Диапазон в конфиге трактуем как ГЛОБАЛЬНЫЕ индексы глав из API (`item["index"]`),
-        # потому что `number` может сбрасываться между томами.
         start_idx = int(start_num)
         end_idx = int(end_num)
+        
         if start_idx > end_idx:
             start_idx, end_idx = end_idx, start_idx
 
-        # extra: поддерживаем оба сценария:
-        # - целые значения => индекс главы
-        # - дробные => номер главы (например 10.1)
+        extra_indices, extra_numbers = self._parse_extra_chapters(extra)
+        seen_keys: set[tuple[int, str]] = set()
+
+        for fallback_idx, item in enumerate(full_data):
+            info = self._create_chapter_info_from_item(item, fallback_idx)
+            if info is None:
+                continue
+
+            if self._should_include_chapter(info, start_idx, end_idx, extra_indices, extra_numbers):
+                key = (info.volume, info.number_str)
+                if key not in seen_keys:
+                    chapter_info_list.append(info)
+                    seen_keys.add(key)
+
+        return sorted(chapter_info_list, key=lambda ch: (ch.index, ch.volume, ch.number))
+
+    def _parse_extra_chapters(self, extra: List[float]) -> tuple[set[int], set[float]]:
+        # Разделяет дополнительные главы на индексы и номера.
         extra_indices = set()
         extra_numbers = set()
+        
         for x in (extra or []):
             try:
                 xf = float(x)
@@ -120,70 +162,63 @@ class MangaAPIClient:
             except Exception:
                 pass
         
-        seen_keys: set[tuple[int, str]] = set()
+        return extra_indices, extra_numbers
 
-        for fallback_idx, item in enumerate(full_data):
-            raw_number = item.get("number") # Получаем сырое значение
-            number = self._parse_chapter_number(raw_number) # Преобразуем во float
-            
-            volume_raw = item.get("volume")
-            volume = 0
-            try:
-                volume = int(volume_raw)
-            except (ValueError, TypeError):
-                pass
+    def _create_chapter_info_from_item(self, item: Dict[str, Any], fallback_idx: int) -> Optional[ChapterInfo]:
+        # Создает ChapterInfo из элемента данных API.
+        raw_number = item.get("number")
+        number = parse_chapter_number(raw_number)
+        
+        volume_raw = item.get("volume")
+        volume = 0
+        try:
+            volume = int(volume_raw)
+        except (ValueError, TypeError):
+            pass
 
-            # Реальный индекс главы в серии — именно он нужен для сортировки/диапазона.
-            api_index_raw = item.get("index")
-            if api_index_raw is None:
-                api_index_raw = item.get("item_number")
-            try:
-                api_index = int(api_index_raw)
-            except (ValueError, TypeError):
-                # fallback: стабильный, но менее точный
-                api_index = fallback_idx + 1
+        api_index_raw = item.get("index") or item.get("item_number")
+        try:
+            api_index = int(api_index_raw)
+        except (ValueError, TypeError):
+            api_index = fallback_idx + 1
 
-            if number is None:
-                continue
+        if number is None:
+            return None
 
-            # Основной критерий: попадаем в диапазон по глобальному индексу
-            in_index_range = start_idx <= api_index <= end_idx
-            # Доп. критерий: явное добавление по номеру (дробные extras)
-            in_extra_numbers = number in extra_numbers
-            # Доп. критерий: явное добавление по индексу (целые extras)
-            in_extra_indices = api_index in extra_indices
+        return ChapterInfo(
+            number=number,
+            number_str=str(raw_number),
+            index=api_index,
+            volume=volume,
+            name=item.get("name") or "",
+            pages_count=item.get("pages_count", 0),
+            series_title=None,
+            teams=item.get("teams", []),
+            chapter_id=item.get("id"),
+        )
 
-            if in_index_range or in_extra_numbers or in_extra_indices:
-                info = ChapterInfo(
-                    number=number,     # Число (для сортировки)
-                    number_str=str(raw_number), # Сохраняем строку для запроса
-                    index=api_index,
-                    volume=volume, 
-                    name=item.get("name") or "",
-                    pages_count=item.get("pages_count", 0),
-                    series_title=None,
-                    teams=item.get("teams", []),
-                    chapter_id=item.get("id"),
-                )
-
-                # номер может повторяться (Volume 2: 1-3), и мы потеряем главы.
-                key = (info.volume, info.number_str)
-                if key not in seen_keys:
-                    chapter_info_list.append(info)
-                    seen_keys.add(key)
-
-        # Сортируем по глобальному индексу: корректно склеивает тома в правильном порядке.
-        return sorted(chapter_info_list, key=lambda ch: (ch.index, ch.volume, ch.number))
+    def _should_include_chapter(
+        self,
+        info: ChapterInfo,
+        start_idx: int,
+        end_idx: int,
+        extra_indices: set[int],
+        extra_numbers: set[float]
+    ) -> bool:
+        # Определяет, должна ли глава быть включена в загрузку.
+        in_index_range = start_idx <= info.index <= end_idx
+        in_extra_numbers = info.number in extra_numbers
+        in_extra_indices = info.index in extra_indices
+        
+        return in_index_range or in_extra_numbers or in_extra_indices
 
     async def download_image_raw(self, url: str, retries: int = 5) -> tuple[bytes, str]:
+        # Загружает изображение как байты.
         if not self._session:
-            raise RuntimeError("Client session is not initialized. Use 'async with MangaAPIClient(...) as api:'")
+            raise RuntimeError("Client session is not initialized")
 
-        headers = {
-            **self._headers,
-            "Referer": self.cfg.referer,
-            "Origin": self.cfg.referer.rstrip("/")
-        }
+        # Используем заголовки сессии (в т.ч. Referer/Origin и Authorization при необходимости).
+        headers = self._headers
 
         for attempt in range(retries):
             try:
@@ -192,19 +227,30 @@ class MangaAPIClient:
                         wait = self._calculate_retry_delay(resp.headers, attempt)
                         await asyncio.sleep(wait)
                         continue
+                    
                     resp.raise_for_status()
                     data = await resp.read()
+                    
                     if not data:
                         raise RuntimeError("Empty response")
+                    
                     ctype = resp.headers.get("Content-Type", "")
                     return data, ctype
+                    
             except Exception:
                 if attempt == retries - 1:
                     raise
                 await asyncio.sleep(0.25 * (attempt + 1))
+        
+        raise RuntimeError("Retries exhausted")
 
-    async def _get_json(self, url: str, params: Optional[Dict[str, Any]] = None, 
-                       retries: int = 5) -> Dict[str, Any]:
+    async def _get_json(
+        self,
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        retries: int = 5
+    ) -> Dict[str, Any]:
+        # Выполняет GET запрос и возвращает JSON.
         for attempt in range(retries):
             try:
                 async with self._session.get(url, params=params, timeout=30) as resp:
@@ -231,6 +277,7 @@ class MangaAPIClient:
                     ))
                     await asyncio.sleep(wait)
                     continue
+                    
                 if attempt == retries - 1:
                     raise
                 await asyncio.sleep(0.2 * (attempt + 1))
@@ -245,66 +292,38 @@ class MangaAPIClient:
 
     @staticmethod
     def _calculate_retry_delay(headers: Dict[str, str], attempt: int) -> float:
+        # Вычисляет задержку перед повторной попыткой.
         retry_after = headers.get("Retry-After")
         if retry_after:
-            # Retry-After может быть числом секунд или HTTP-date — в простом случае пытаемся int
             try:
-                # если в заголовке число — используем его
                 sec = int(float(retry_after))
                 return float(sec) + 1.0
             except Exception:
-                # если не число — fallback на экспоненцию
                 pass
 
-        # базовый backoff
         base = min(2 ** attempt, 60)
         jitter = random.uniform(0.3, 1.3)
         return base + 0.1 * attempt + jitter
 
-    @staticmethod
-    def _parse_float(value: str) -> Optional[float]:
-        try:
-            return float(value)
-        except ValueError:
-            try:
-                return float(value.replace(",", "."))
-            except ValueError:
-                return None
-
     async def fetch_chapters_list(self, slug: str) -> Dict[float, int]:
+        # Получает список глав с номерами и томами.
         if slug in self._chapters_map:
             return self._chapters_map[slug]
+
+        # Если уже загружен полный пул глав, строим карту томов из кэша (уменьшаем количество HTTP запросов в рамках одного сеанса).
+        if slug in self._full_pool_cache:
+            mapping = self._build_chapters_map_from_items(self._full_pool_cache[slug])
+            self._chapters_map[slug] = mapping
+            return mapping
 
         url = f"{self.cfg.api_base}/{slug}/chapters"
         mapping: Dict[float, int] = {}
 
         try:
             data = await self._get_json(url, retries=4)
-            items = []
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict):
-                for key in ("data", "items", "chapters"):
-                    val = data.get(key)
-                    if isinstance(val, list):
-                        items = val
-                        break
-
-            for item in items:
-                chapter_num = item.get("number")
-                volume_num = item.get("volume")
-
-                if chapter_num is None or volume_num is None:
-                    continue
-
-                chapter_float = self._parse_float(str(chapter_num))
-                try:
-                    volume_int = int(volume_num)
-                except (ValueError, TypeError):
-                    continue
-
-                if chapter_float is not None:
-                    mapping[chapter_float] = volume_int
+            items = self._extract_items_from_response(data)
+            mapping = self._build_chapters_map_from_items(items)
+                    
         except Exception:
             mapping = {}
 
@@ -312,6 +331,7 @@ class MangaAPIClient:
         return mapping
 
     async def fetch_series_info(self, slug: str) -> Dict[str, Any]:
+        # Получает информацию о серии.
         if slug in self._series_cache:
             return self._series_cache[slug]
 
@@ -335,11 +355,14 @@ class MangaAPIClient:
         self._series_cache[slug] = result
         return result
 
-    # Тип chapter_num теперь включает str
-    async def fetch_chapter_data(self, slug: str, chapter_num: Union[int, float, str],
-                                 volume: int) -> Dict[str, Any]:
+    async def fetch_chapter_data(
+        self,
+        slug: str,
+        chapter_num: Union[int, float, str],
+        volume: int
+    ) -> Dict[str, Any]:
+        # Получает данные главы.
         url = f"{self.cfg.api_base}/{slug}/chapter"
-        # API получит string, если мы его передадим
         return await self._get_json(
             url,
             params={"number": chapter_num, "volume": volume},
@@ -347,6 +370,7 @@ class MangaAPIClient:
         )
 
     async def resolve_volume(self, slug: str, chapter_num: int) -> int:
+        # Определяет том для главы.
         if self.cfg.volume_override is not None:
             return self.cfg.volume_override
 
@@ -368,15 +392,19 @@ class MangaAPIClient:
 
         return await self._bruteforce_volume(slug, chapter_num)
 
-    def _search_volume_in_metadata(self, metadata: Dict[str, Any], 
-                                   target_chapter: float) -> Optional[int]:
+    def _search_volume_in_metadata(
+        self,
+        metadata: Dict[str, Any],
+        target_chapter: float
+    ) -> Optional[int]:
+        # Ищет том для главы в метаданных.
         def search(obj) -> Optional[int]:
             if isinstance(obj, dict):
                 num = obj.get("number") or obj.get("chapter_number")
                 vol = obj.get("volume")
 
                 if num is not None and vol is not None:
-                    chapter_float = self._parse_float(str(num))
+                    chapter_float = parse_float(str(num))
                     if chapter_float == target_chapter:
                         try:
                             return int(vol)
@@ -387,16 +415,19 @@ class MangaAPIClient:
                     result = search(value)
                     if result is not None:
                         return result
+                        
             elif isinstance(obj, list):
                 for item in obj:
                     result = search(item)
                     if result is not None:
                         return result
+                        
             return None
 
         return search(metadata)
 
     async def _bruteforce_volume(self, slug: str, chapter_num: int) -> int:
+        # Перебирает тома для нахождения нужного.
         start, end = self.cfg.fallback_volume_range
 
         for volume in range(start, end + 1):
@@ -409,12 +440,13 @@ class MangaAPIClient:
 
         raise ValueError(f"Could not determine volume for chapter {chapter_num}")
 
-    async def download_image(self, url: str, dest: Path, retries: int = 10):
-        headers = {
-            **self._headers,
-            "Referer": self.cfg.referer,
-            "Origin": self.cfg.referer.rstrip("/")
-        }
+    async def download_image(self, url: str, dest: Path, retries: int = 10) -> None:
+        # Загружает изображение и сохраняет в файл.
+        # URL
+        # Dest
+        # Retries
+        # Используем заголовки сессии (в т.ч. Referer/Origin и Authorization при необходимости).
+        headers = self._headers
 
         for attempt in range(retries):
             try:
@@ -449,7 +481,6 @@ class MangaAPIClient:
                     return
 
             except aiohttp.ClientResponseError as e:
-                # Если ошибка HTTP и последний заход — пробрасываем
                 if attempt == retries - 1:
                     print(Colors.error(f"Image download failed after {retries} attempts: {e}"))
                     raise

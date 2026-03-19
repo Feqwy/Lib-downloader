@@ -6,28 +6,39 @@ class Colors:
     YELLOW = "\033[93m"
     RED = "\033[91m"
     CYAN = "\033[96m"
-    MAG = "\033[95m"
+    MAGENTA = "\033[95m"
 
-    @staticmethod
-    def success(msg: str) -> str:
-        return f"{Colors.GREEN}Success: {Colors.RESET} {msg}"
+    @classmethod
+    def _colorize(cls, color: str, message: str) -> str:
+        # Применяет цвет к сообщению.
+        return f"{color}{message}{cls.RESET}"
 
-    @staticmethod
-    def info(msg: str) -> str:
-        return f"{Colors.CYAN}Info: {Colors.RESET} {msg}"
+    @classmethod
+    def success(cls, msg: str) -> str:
+        # Форматирует сообщение об успехе.
+        return cls._colorize(cls.GREEN, f"Success: {msg}")
 
-    @staticmethod
-    def error(msg: str) -> str:
-        return f"{Colors.RED}Error: {Colors.RESET} {msg}"
+    @classmethod
+    def info(cls, msg: str) -> str:
+        # Форматирует информационное сообщение.
+        return cls._colorize(cls.CYAN, f"Info: {msg}")
 
-    @staticmethod
-    def warning(msg: str) -> str:
-        return f"{Colors.YELLOW}Warning: {Colors.RESET} {msg}"
+    @classmethod
+    def error(cls, msg: str) -> str:
+        # Форматирует сообщение об ошибке.
+        return cls._colorize(cls.RED, f"Error: {msg}")
 
-    @staticmethod
-    def chapter(num: int) -> str:
-        return f"{Colors.BOLD}{Colors.MAG}Chapter {num}{Colors.RESET}"
+    @classmethod
+    def warning(cls, msg: str) -> str:
+        # Форматирует предупреждение.
+        return cls._colorize(cls.YELLOW, f"Warning: {msg}")
 
-    @staticmethod
-    def title(text: str) -> str:
-        return f"{Colors.BOLD}{Colors.BLUE}{text}{Colors.RESET}"
+    @classmethod
+    def chapter(cls, num: int) -> str:
+        # Форматирует номер главы.
+        return f"{cls.BOLD}{cls.MAGENTA}Chapter {num}{cls.RESET}"
+
+    @classmethod
+    def title(cls, text: str) -> str:
+        # Форматирует заголовок.
+        return f"{cls.BOLD}{cls.BLUE}{text}{cls.RESET}"
