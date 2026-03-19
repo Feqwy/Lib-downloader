@@ -2,18 +2,6 @@
 
 Асинхронный загрузчик манги с Lib-сайтов (MangaLib, SlashLib, HentaiLib и RanobeLib) с автоматической проверкой обновлений и генерацией метаданных для Komga/Mylar.
 
-## Стек технологий
-
-| Компонент | Технология |
-|-----------|------------|
-| Язык | Python 3.10+ |
-| HTTP-клиент | aiohttp (асинхронный) |
-| Обработка изображений | Pillow |
-| Прогресс-бары | tqdm |
-| Конфигурация | python-dotenv |
-| Браузерное расширение | Chrome Extension API (Manifest V3) |
-| Веб-сервер | aiohttp.web |
-| WebSocket | aiohttp.WSMsgType |
 
 ## Установка
 
