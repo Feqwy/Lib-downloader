@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkTokenVisibility() {
-    if (domainEl.value === 'v2.shlib.life' || domainEl.value === 'hentailib.me') {
+    if (domainEl.value === 'v2.shlib.life' || domainEl.value === 'hentailib.me' || domainEl.value === 'mangalib.me' || domainEl.value === 'mangalib.org' || domainEl.value === 'ranobelib.me') {
       tokenGroup.style.display = 'block';
     } else {
       tokenGroup.style.display = 'none';
@@ -335,12 +335,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const storageData = await chrome.storage.local.get(['captured_token', 'extractedToken']);
       let token = tokenEl.value.trim() || storageData.captured_token || storageData.extractedToken || null;
 
-      const isShlib = domain === 'v2.shlib.life' || domain === 'hentailib.me';
-      if (isShlib && !token) {
-        showNotification('Для этого домена нужен токен! Обновите страницу (F5), затем нажмите "Взять".', 'error');
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'Отправить на сервер';
-        return;
+      if (!token) {
+        console.log('[Popup] Токен не найден, отправка без токена (доступен только обычный контент)');
       }
 
       if (token && !token.toLowerCase().startsWith('bearer ')) {

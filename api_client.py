@@ -37,9 +37,14 @@ class MangaAPIClient:
             "Referer": self.cfg.referer,
             "Origin": self.cfg.referer.rstrip("/")
         }
-        
+
         if self.cfg.auth_token:
-            self._headers["Authorization"] = f"Bearer {self.cfg.auth_token}"
+            # Добавляем префикс Bearer, если его ещё нет
+            token = self.cfg.auth_token.strip()
+            if not token.lower().startswith('bearer '):
+                self._headers["Authorization"] = f"Bearer {token}"
+            else:
+                self._headers["Authorization"] = token
 
     async def __aenter__(self):
         conn = aiohttp.TCPConnector(limit=self.cfg.max_concurrent_images * 2)

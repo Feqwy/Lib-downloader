@@ -154,9 +154,9 @@ def _build_request_headers(domain: str, token: Optional[str]) -> Dict[str, str]:
         "Referer": API_CONFIGS.get(domain, {}).get("referer", "")
     }
 
-    if "shlib.life" in domain and token:
+    if token:
         headers["authorization"] = token
-        
+
     return headers
 
 
@@ -348,16 +348,20 @@ async def handle_check(request: web.Request) -> web.Response:
 
 
 def _validate_token(domain: str, token: Optional[str]) -> bool:
-    # Проверяет необходимость и наличие токена.
-    if "shlib.life" in domain or "hentailib.me" in domain:
-        return token is not None
+    # Проверяет наличие токена.
+    # Токен опционален для всех сайтов, но требуется для доступа к 18+ контенту
+    # Если токен предоставлен - принимаем его
+    # Если токена нет - продолжаем без него (доступен только обычный контент)
     return True
 
 
 def _log_mode_info(domain: str, token: Optional[str]) -> None:
     # Логирует информацию о режиме работы.
     if "ranobelib.me" in domain:
-        logger.info(f"Режим: {domain.upper()} (Текстовые главы; без токена)")
+        if token:
+            logger.info(f"Режим: {domain.upper()} (Текстовые главы; токен получен)")
+        else:
+            logger.info(f"Режим: {domain.upper()} (Текстовые главы; без токена)")
     elif not token:
         logger.info(f"Режим: {domain.upper()} (Без токена)")
     else:

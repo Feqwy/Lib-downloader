@@ -165,8 +165,7 @@ def get_api_config_for_domain(domain: str) -> dict:
 
 
 def is_token_required(domain: str) -> bool:
-    # Проверяет, требуется ли токен для домена.
-    return "shlib.life" in domain or "hentailib.me" in domain
+    return "shlib.life" in domain or "hentailib.me" in domain or "mangalib.me" in domain or "mangalib.org" in domain or "ranobelib.me" in domain
 
 
 def is_ranobelib(domain: str) -> bool:

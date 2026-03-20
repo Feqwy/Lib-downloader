@@ -336,30 +336,32 @@ def _prompt_api_selection() -> Dict[str, Any]:
     print(f"  4. HentaiLib (hentailib.me)")
 
     api_choice = input(f"\nВаш выбор [1-4, по умолчанию 1]: ").strip() or "1"
-    
+
     if api_choice == "2":
         print_info("Выбран API SlashLib")
         config = get_api_config_for_domain("v2.shlib.life")
         print_info("Требуется Bearer Token (можно получить через расширение)")
         config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-        
+
     elif api_choice == "3":
         print_info("Выбран API RanobeLib")
         config = get_api_config_for_domain("ranobelib.me")
         print_info("Текстовые главы, без изображений")
-        config["auth_token"] = None
-        
+        print_info("Для доступа к 18+ контенту требуется Bearer Token")
+        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+
     elif api_choice == "4":
         print_info("Выбран API HentaiLib")
         config = get_api_config_for_domain("hentailib.me")
         print_info("Требуется Bearer Token (можно получить через расширение)")
         config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-        
+
     else:
         print_info("Выбран API MangaLib")
         config = get_api_config_for_domain("mangalib.me")
-        config["auth_token"] = None
-    
+        print_info("Для доступа к 18+ контенту требуется Bearer Token")
+        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+
     return config
 
 
@@ -370,24 +372,26 @@ def _detect_api_config_from_url(manga_url: str) -> Dict[str, Any]:
         config = get_api_config_for_domain("v2.shlib.life")
         print_info("Требуется Bearer Token (можно получить через расширение)")
         config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-        
+
     elif "hentailib.me" in manga_url:
         print_info("Обнаружена ссылка на HentaiLib")
         config = get_api_config_for_domain("hentailib.me")
         print_info("Требуется Bearer Token (можно получить через расширение)")
         config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-        
+
     elif "ranobelib.me" in manga_url:
         print_info("Обнаружена ссылка на RanobeLib")
         config = get_api_config_for_domain("ranobelib.me")
         print_info("Текстовые главы, без изображений")
-        config["auth_token"] = None
-        
+        print_info("Для доступа к 18+ контенту требуется Bearer Token")
+        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+
     else:
         print_info("Используется API MangaLib")
         config = get_api_config_for_domain("mangalib.me")
-        config["auth_token"] = None
-    
+        print_info("Для доступа к 18+ контенту требуется Bearer Token")
+        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+
     return config
 
 

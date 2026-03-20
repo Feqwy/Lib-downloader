@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lib Downloader",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "description": "Собирает slug манги и ранобэ с динамически загружаемых страниц и отправляет их на локальный сервер",
   "permissions": [
     "storage",
@@ -37,5 +37,17 @@
   },
   "background": {
     "service_worker": "background.js"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["*"],
+      "matches": [
+        "https://v2.shlib.life/*",
+        "https://mangalib.me/*",
+        "https://mangalib.org/*",
+        "https://ranobelib.me/*",
+        "https://hentailib.me/*"
+      ]
+    }
+  ]
 }
