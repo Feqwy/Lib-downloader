@@ -132,7 +132,7 @@ def get_api_config_for_domain(domain: str) -> dict:
         "v2.shlib.life": {
             "api": "https://hapi.hentaicdn.org/api/manga",
             "referer": "https://v2.shlib.life/",
-            "image_host": "https://img3.mixlib.me",
+            "image_host": "https://img3.hentaicdn.org",
             "site_type": "shlib"
         },
         "mangalib.me": {
