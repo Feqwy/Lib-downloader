@@ -4,9 +4,10 @@ import sys
 from pathlib import Path
 from typing import Optional, Union, List
 
+from sites import get_site, is_ranobelib as _is_ranobelib, is_token_required as _is_token_required
+
 
 def parse_float(value: str) -> Optional[float]:
-    # Преобразует строку в float, поддерживая запятую как разделитель.
     try:
         return float(value)
     except ValueError:
@@ -17,7 +18,6 @@ def parse_float(value: str) -> Optional[float]:
 
 
 def parse_chapter_number(number: Union[int, float, str, None]) -> Optional[Union[int, float]]:
-    # Преобразует значение номера главы в число (int или float).
     if number is None:
         return None
     
@@ -34,7 +34,6 @@ def parse_chapter_number(number: Union[int, float, str, None]) -> Optional[Union
 
 
 def format_chapter_number(num: Union[int, float, str]) -> str:
-    # Форматирует номер главы для отображения.
     if isinstance(num, str):
         return num
     
@@ -49,14 +48,12 @@ def format_chapter_number(num: Union[int, float, str]) -> str:
 
 
 def sanitize_filename(text: str) -> str:
-    # Очищает строку для использования в имени файла.
     text = (text or "").strip()
     text = re.sub(r'[\\/*?:"<>|]', "_", text)
     return text[:200]
 
 
 def build_image_url(path: str, host: str) -> str:
-    # Строит полный URL изображения из пути и хоста.
     if not path:
         raise ValueError("Empty image path")
     
@@ -73,7 +70,6 @@ def build_image_url(path: str, host: str) -> str:
 
 
 def clean_chapter_name(name: str) -> str:
-    # Очищает название главы от номеров и служебной информации.
     if not name:
         return ""
     
@@ -83,12 +79,10 @@ def clean_chapter_name(name: str) -> str:
 
 
 def clear_console() -> None:
-    # Очищает консоль в зависимости от ОС.
     os.system('cls' if os.name == 'nt' else 'clear')
 
 
 def configure_utf8_console() -> None:
-    # Настраивает UTF-8 кодировку для консоли (актуально на Windows).
     try:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -99,7 +93,6 @@ def configure_utf8_console() -> None:
 
 
 def parse_yes_no(value: str, default: str = "n") -> bool:
-    # Преобразует строку в булево значение.
     value = value.strip().lower()
     
     if not value:
@@ -116,7 +109,6 @@ def parse_yes_no(value: str, default: str = "n") -> bool:
 
 
 def extract_slug_from_url(url: str) -> str:
-    # Извлекает slug манги из URL.
     try:
         slug = url.split("/")[-1].split("?")[0]
         if not slug:
@@ -127,47 +119,12 @@ def extract_slug_from_url(url: str) -> str:
 
 
 def get_api_config_for_domain(domain: str) -> dict:
-    # Возвращает конфигурацию API для домена.
-    configs = {
-        "v2.shlib.life": {
-            "api": "https://hapi.hentaicdn.org/api/manga",
-            "referer": "https://v2.shlib.life/",
-            "image_host": "https://img3.hentaicdn.org",
-            "site_type": "shlib"
-        },
-        "mangalib.me": {
-            "api": "https://api.cdnlibs.org/api/manga",
-            "referer": "https://mangalib.me/",
-            "image_host": "https://img3.mixlib.me",
-            "site_type": "mangalib"
-        },
-        "mangalib.org": {
-            "api": "https://api.cdnlibs.org/api/manga",
-            "referer": "https://mangalib.org/",
-            "image_host": "https://img3.mixlib.me",
-            "site_type": "mangalib"
-        },
-        "ranobelib.me": {
-            "api": "https://api.cdnlibs.org/api/manga",
-            "referer": "https://ranobelib.me/",
-            "image_host": "https://img3.mixlib.me",
-            "site_type": "ranobelib"
-        },
-        "hentailib.me": {
-            "api": "https://hapi.hentaicdn.org/api/manga",
-            "referer": "https://hentailib.me/",
-            "image_host": "https://img3.hentaicdn.org",
-            "site_type": "hentailib"
-        }
-    }
-    
-    return configs.get(domain, configs["mangalib.me"])
+    return get_site(domain).as_api_dict()
 
 
 def is_token_required(domain: str) -> bool:
-    return "shlib.life" in domain or "hentailib.me" in domain or "mangalib.me" in domain or "mangalib.org" in domain or "ranobelib.me" in domain
+    return _is_token_required(domain)
 
 
 def is_ranobelib(domain: str) -> bool:
-    # Проверяет, является ли домен RanobeLib.
-    return "ranobelib.me" in domain
+    return _is_ranobelib(domain)

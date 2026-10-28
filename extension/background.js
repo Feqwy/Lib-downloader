@@ -4,12 +4,13 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Перехват сетевых запросов для захвата заголовка Authorization
 const targetUrls = [
-  "*://hapi.hentaicdn.org/api/*",     // Shlib, HentaiLib
-  "*://api.cdnlibs.org/api/*",        // Mangalib, RanobeLib
+  "*://hapi.hentaicdn.org/api/*",     // Shlib HentaiLib
+  "*://api.cdnlibs.org/api/*",        // Mangalib RanobeLib
   "*://mangalib.me/api/*",            // Mangalib прямой доступ
   "*://ranobelib.me/api/*",           // RanobeLib прямой доступ
   "*://hentailib.me/api/*",           // HentaiLib прямой доступ
   "*://v2.shlib.life/api/*",          // Shlib прямой доступ
+  "https://api.imglib.info/*"         // Mangalib RanobeLib
 ];
 
 chrome.webRequest.onBeforeSendHeaders.addListener(

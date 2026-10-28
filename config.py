@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 
 
-# Конфигурация загрузки манги.
 @dataclass
 class Config:
     
@@ -22,31 +21,27 @@ class Config:
     cleanup_temp: bool = True
     pack_cbz: bool = True
     generate_metadata: bool = True
+    text_output: str = "both"
     
     api_base: str = "https://api.cdnlibs.org/api/manga"
-    image_host: str = "https://img3.mixlib.me"
+    image_host: str = "https://img3.cdnlibs.org"
     referer: str = "https://mangalib.me/"
     auth_token: Optional[str] = None
     site_type: str = "mangalib"
     
     @property
     def is_ranobelib(self) -> bool:
-        # Проверяет, является ли источник RanobeLib.
         return self.site_type == "ranobelib"
 
     @property
     def is_hentailib(self) -> bool:
-        # Проверяет, является ли источник HentaiLib.
         return self.site_type == "hentailib"
 
     @property
     def is_slashlib(self) -> bool:
-        # Проверяет, является ли источник SlashLib.
         return self.site_type == "shlib"
 
     def validate(self) -> List[str]:
-        # Проверяет корректность конфигурации.
-        # Список ошибок валидации (пустой, если всё корректно).
         errors = []
         
         if not self.manga_slug:

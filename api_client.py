@@ -6,13 +6,12 @@ from typing import Optional, Dict, Any, List, Union
 import aiohttp
 
 from config import Config
-from colors import Colors
 from models import ChapterInfo
+from api_parsing import extract_items_from_response, get_chapter_index
+from reporting import ConsoleReporter, Reporter
 from utils import parse_chapter_number, parse_float
 
 
-# Асинхронный клиент для работы с API Lib-сайтов.
-# Поддерживает: MangaLib, SlashLib, RanobeLib, HentaiLib.
 class MangaAPIClient:
     DEFAULT_HEADERS = {
         "User-Agent": "Mozilla/5.0 (iPad; CPU OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0.7444.46 Mobile/15E148 Safari/604.1",
@@ -20,18 +19,15 @@ class MangaAPIClient:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
-    def __init__(self, cfg: Config):
-        # Инициализирует клиент.
-        # cfg
+    def __init__(self, cfg: Config, reporter: Optional[Reporter] = None):
         self.cfg = cfg
+        self.reporter = reporter or ConsoleReporter()
         self._session: Optional[aiohttp.ClientSession] = None
         
-        # Кэш данных
         self._chapters_map: Dict[str, Dict[float, int]] = {}
         self._series_cache: Dict[str, Dict[str, Any]] = {}
         self._full_pool_cache: Dict[str, List[Dict[str, Any]]] = {}
         
-        # Заголовки
         self._headers = {
             **self.DEFAULT_HEADERS,
             "Referer": self.cfg.referer,
@@ -39,7 +35,6 @@ class MangaAPIClient:
         }
 
         if self.cfg.auth_token:
-            # Добавляем префикс Bearer, если его ещё нет
             token = self.cfg.auth_token.strip()
             if not token.lower().startswith('bearer '):
                 self._headers["Authorization"] = f"Bearer {token}"
@@ -57,7 +52,6 @@ class MangaAPIClient:
             await self._session.close()
 
     async def _warm_up_session(self) -> None:
-        # Прогревает сессию легким запросом к рефереру.
         try:
             async with self._session.get(self.cfg.referer, timeout=6):
                 pass
@@ -65,7 +59,6 @@ class MangaAPIClient:
             pass
 
     async def fetch_full_chapter_pool(self, slug: str) -> List[Dict[str, Any]]:
-        # Получает полный список глав для тайтла.
         if slug in self._full_pool_cache:
             return self._full_pool_cache[slug]
 
@@ -77,27 +70,16 @@ class MangaAPIClient:
             self._full_pool_cache[slug] = items
             return items
         except Exception as e:
-            print(Colors.error(f"Не удалось получить список глав: {e}"))
+            self.reporter.error(f"Не удалось получить список глав: {e}")
             return []
 
     def _extract_items_from_response(self, data: Any) -> List[Dict[str, Any]]:
-        # Извлекает список элементов из ответа API.
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
-        
-        if isinstance(data, dict):
-            for key in ("data", "items", "chapters"):
-                val = data.get(key)
-                if isinstance(val, list):
-                    return [x for x in val if isinstance(x, dict)]
-        
-        return []
+        return extract_items_from_response(data)
 
     def _build_chapters_map_from_items(
         self,
         items: List[Dict[str, Any]],
     ) -> Dict[float, int]:
-        # Преобразует список элементов /chapters в карту {chapter_number: volume}.
         mapping: Dict[float, int] = {}
 
         for item in items:
@@ -153,7 +135,6 @@ class MangaAPIClient:
         return sorted(chapter_info_list, key=lambda ch: (ch.index, ch.volume, ch.number))
 
     def _parse_extra_chapters(self, extra: List[float]) -> tuple[set[int], set[float]]:
-        # Разделяет дополнительные главы на индексы и номера.
         extra_indices = set()
         extra_numbers = set()
         
@@ -170,7 +151,6 @@ class MangaAPIClient:
         return extra_indices, extra_numbers
 
     def _create_chapter_info_from_item(self, item: Dict[str, Any], fallback_idx: int) -> Optional[ChapterInfo]:
-        # Создает ChapterInfo из элемента данных API.
         raw_number = item.get("number")
         number = parse_chapter_number(raw_number)
         
@@ -181,11 +161,7 @@ class MangaAPIClient:
         except (ValueError, TypeError):
             pass
 
-        api_index_raw = item.get("index") or item.get("item_number")
-        try:
-            api_index = int(api_index_raw)
-        except (ValueError, TypeError):
-            api_index = fallback_idx + 1
+        api_index = get_chapter_index(item, fallback_idx + 1)
 
         if number is None:
             return None
@@ -210,7 +186,6 @@ class MangaAPIClient:
         extra_indices: set[int],
         extra_numbers: set[float]
     ) -> bool:
-        # Определяет, должна ли глава быть включена в загрузку.
         in_index_range = start_idx <= info.index <= end_idx
         in_extra_numbers = info.number in extra_numbers
         in_extra_indices = info.index in extra_indices
@@ -218,11 +193,9 @@ class MangaAPIClient:
         return in_index_range or in_extra_numbers or in_extra_indices
 
     async def download_image_raw(self, url: str, retries: int = 5) -> tuple[bytes, str]:
-        # Загружает изображение как байты.
         if not self._session:
             raise RuntimeError("Client session is not initialized")
 
-        # Используем заголовки сессии (в т.ч. Referer/Origin и Authorization при необходимости).
         headers = self._headers
 
         for attempt in range(retries):
@@ -255,16 +228,17 @@ class MangaAPIClient:
         params: Optional[Dict[str, Any]] = None,
         retries: int = 5
     ) -> Dict[str, Any]:
-        # Выполняет GET запрос и возвращает JSON.
         for attempt in range(retries):
             try:
                 async with self._session.get(url, params=params, timeout=30) as resp:
                     if resp.status == 429:
                         wait = self._calculate_retry_delay(resp.headers, attempt)
-                        print(Colors.warning(
-                            f"Rate limit (429). Retry in {wait:.2f}s... "
-                            f"(Attempt {attempt + 1}/{retries})"
-                        ))
+                        self.reporter.rate_limited(
+                            wait,
+                            kind="json",
+                            attempt=attempt + 1,
+                            retries=retries,
+                        )
                         await asyncio.sleep(wait)
                         continue
 
@@ -276,10 +250,12 @@ class MangaAPIClient:
             except aiohttp.ClientResponseError as e:
                 if getattr(e, "status", None) == 429:
                     wait = self._calculate_retry_delay({}, attempt)
-                    print(Colors.warning(
-                        f"Rate limit (429) via exception. Retry in {wait:.2f}s... "
-                        f"(Attempt {attempt + 1}/{retries})"
-                    ))
+                    self.reporter.rate_limited(
+                        wait,
+                        kind="json_exception",
+                        attempt=attempt + 1,
+                        retries=retries,
+                    )
                     await asyncio.sleep(wait)
                     continue
                     
@@ -289,7 +265,7 @@ class MangaAPIClient:
 
             except Exception as e:
                 if attempt == retries - 1:
-                    print(Colors.error(f"Request failed after {retries} attempts: {e}"))
+                    self.reporter.error(f"Request failed after {retries} attempts: {e}")
                     raise
                 await asyncio.sleep(0.2 * (attempt + 1))
 
@@ -297,7 +273,6 @@ class MangaAPIClient:
 
     @staticmethod
     def _calculate_retry_delay(headers: Dict[str, str], attempt: int) -> float:
-        # Вычисляет задержку перед повторной попыткой.
         retry_after = headers.get("Retry-After")
         if retry_after:
             try:
@@ -311,11 +286,9 @@ class MangaAPIClient:
         return base + 0.1 * attempt + jitter
 
     async def fetch_chapters_list(self, slug: str) -> Dict[float, int]:
-        # Получает список глав с номерами и томами.
         if slug in self._chapters_map:
             return self._chapters_map[slug]
 
-        # Если уже загружен полный пул глав, строим карту томов из кэша (уменьшаем количество HTTP запросов в рамках одного сеанса).
         if slug in self._full_pool_cache:
             mapping = self._build_chapters_map_from_items(self._full_pool_cache[slug])
             self._chapters_map[slug] = mapping
@@ -336,7 +309,6 @@ class MangaAPIClient:
         return mapping
 
     async def fetch_series_info(self, slug: str) -> Dict[str, Any]:
-        # Получает информацию о серии.
         if slug in self._series_cache:
             return self._series_cache[slug]
 
@@ -366,7 +338,6 @@ class MangaAPIClient:
         chapter_num: Union[int, float, str],
         volume: int
     ) -> Dict[str, Any]:
-        # Получает данные главы.
         url = f"{self.cfg.api_base}/{slug}/chapter"
         return await self._get_json(
             url,
@@ -375,7 +346,6 @@ class MangaAPIClient:
         )
 
     async def resolve_volume(self, slug: str, chapter_num: int) -> int:
-        # Определяет том для главы.
         if self.cfg.volume_override is not None:
             return self.cfg.volume_override
 
@@ -402,7 +372,6 @@ class MangaAPIClient:
         metadata: Dict[str, Any],
         target_chapter: float
     ) -> Optional[int]:
-        # Ищет том для главы в метаданных.
         def search(obj) -> Optional[int]:
             if isinstance(obj, dict):
                 num = obj.get("number") or obj.get("chapter_number")
@@ -432,7 +401,6 @@ class MangaAPIClient:
         return search(metadata)
 
     async def _bruteforce_volume(self, slug: str, chapter_num: int) -> int:
-        # Перебирает тома для нахождения нужного.
         start, end = self.cfg.fallback_volume_range
 
         for volume in range(start, end + 1):
@@ -446,11 +414,6 @@ class MangaAPIClient:
         raise ValueError(f"Could not determine volume for chapter {chapter_num}")
 
     async def download_image(self, url: str, dest: Path, retries: int = 10) -> None:
-        # Загружает изображение и сохраняет в файл.
-        # URL
-        # Dest
-        # Retries
-        # Используем заголовки сессии (в т.ч. Referer/Origin и Authorization при необходимости).
         headers = self._headers
 
         for attempt in range(retries):
@@ -458,18 +421,20 @@ class MangaAPIClient:
                 async with self._session.get(url, headers=headers, timeout=60) as resp:
                     if resp.status == 429:
                         wait = self._calculate_retry_delay(resp.headers, attempt)
-                        print(Colors.warning(
-                            f"Rate limit (429) for image. Retry in {wait:.2f}s... "
-                            f"(Attempt {attempt + 1}/{retries})"
-                        ))
+                        self.reporter.rate_limited(
+                            wait,
+                            kind="image",
+                            attempt=attempt + 1,
+                            retries=retries,
+                        )
                         await asyncio.sleep(wait)
                         continue
 
                     if resp.status == 403 and attempt < retries - 1:
-                        print(Colors.warning(
+                        self.reporter.warning(
                             f"403 Forbidden. Warming up and retrying... "
                             f"(Attempt {attempt + 1}/{retries})"
-                        ))
+                        )
                         await self._warm_up_session()
                         await asyncio.sleep(0.3 * (attempt + 1))
                         continue
@@ -487,12 +452,12 @@ class MangaAPIClient:
 
             except aiohttp.ClientResponseError as e:
                 if attempt == retries - 1:
-                    print(Colors.error(f"Image download failed after {retries} attempts: {e}"))
+                    self.reporter.error(f"Image download failed after {retries} attempts: {e}")
                     raise
                 await asyncio.sleep(0.2 * (attempt + 1))
 
             except Exception as e:
                 if attempt == retries - 1:
-                    print(Colors.error(f"Image download failed after {retries} attempts: {e}"))
+                    self.reporter.error(f"Image download failed after {retries} attempts: {e}")
                     raise
                 await asyncio.sleep(0.2 * (attempt + 1))

@@ -1,5 +1,4 @@
 import asyncio
-import csv
 import json
 import logging
 import os
@@ -13,45 +12,37 @@ import aiohttp
 from aiohttp import web, WSMsgType
 from dotenv import load_dotenv
 
-# Константы
+from api_parsing import (
+    extract_items_from_response as _extract_api_items,
+    get_chapter_index as _get_chapter_index,
+)
+from csv_contract import (
+    CSV_FILE_NAME,
+    format_missing_tokens as _format_missing_tokens,
+    write_check_csv,
+)
+from sites import SITES
 
-CSV_FILE_NAME = "chapter_checker_log.csv"
+
 LOG_BUFFER_SIZE = 200
 RETRY_DELAYS = [3, 7, 12, 17, 25]
 
 CHAPTER_REGEX = re.compile(r"Chapter\s+([\d\.]+)", re.IGNORECASE)
 VOLUME_REGEX = re.compile(r"Volume\s+(\d+)", re.IGNORECASE)
 
-# Конфигурация API для разных доменов
+
 API_CONFIGS = {
-    "v2.shlib.life": {
-        "api": "https://hapi.hentaicdn.org/api/manga",
-        "referer": "https://v2.shlib.life/"
-    },
-    "mangalib.me": {
-        "api": "https://api.cdnlibs.org/api/manga",
-        "referer": "https://mangalib.me/"
-    },
-    "mangalib.org": {
-        "api": "https://api.cdnlibs.org/api/manga",
-        "referer": "https://mangalib.org/"
-    },
-    "ranobelib.me": {
-        "api": "https://api.cdnlibs.org/api/manga",
-        "referer": "https://ranobelib.me/"
-    },
-    "hentailib.me": {
-        "api": "https://hapi.hentaicdn.org/api/manga",
-        "referer": "https://hentailib.me/"
+    domain: {
+        "api": site.api,
+        "referer": site.referer,
     }
+    for domain, site in SITES.items()
 }
 
-# Логи
 
 log_buffer = deque(maxlen=LOG_BUFFER_SIZE)
 
 
-# Обработчик логов, сохраняющий сообщения в памяти.
 class MemoryLogHandler(logging.Handler):
 
     def emit(self, record):
@@ -59,10 +50,8 @@ class MemoryLogHandler(logging.Handler):
         log_buffer.append(msg)
 
 
-# Отключаем логи доступа aiohttp
 logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
-# Настройка логгера
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -71,17 +60,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("MangaServer")
 
-# Утилиты
 
 def get_local_chapters(manga_path: Path) -> Set[Tuple[int, str]]:
-    # Получает список локальных глав из файловой системы.
     try:
         if not manga_path.exists():
             return set()
 
         local_keys: Set[Tuple[int, str]] = set()
 
-        # Основной сценарий: downloads/<slug>/Volume 01/Chapter 1
         volume_dirs = [
             p for p in manga_path.iterdir()
             if p.is_dir() and VOLUME_REGEX.search(p.name or "")
@@ -90,7 +76,6 @@ def get_local_chapters(manga_path: Path) -> Set[Tuple[int, str]]:
         if volume_dirs:
             return _scan_volume_structure(volume_dirs)
 
-        # Fallback: старый формат без Volume-папок
         return _scan_legacy_structure(manga_path)
         
     except Exception as e:
@@ -99,7 +84,6 @@ def get_local_chapters(manga_path: Path) -> Set[Tuple[int, str]]:
 
 
 def _scan_volume_structure(volume_dirs: List[Path]) -> Set[Tuple[int, str]]:
-    # Сканирует структуру с Volume папками.
     local_keys: Set[Tuple[int, str]] = set()
     
     for vol_dir in volume_dirs:
@@ -129,7 +113,6 @@ def _scan_volume_structure(volume_dirs: List[Path]) -> Set[Tuple[int, str]]:
 
 
 def _scan_legacy_structure(manga_path: Path) -> Set[Tuple[int, str]]:
-    # Сканирует старую структуру без Volume папок.
     local_keys: Set[Tuple[int, str]] = set()
     
     for root, dirs, files in os.walk(manga_path):
@@ -147,7 +130,6 @@ def _scan_legacy_structure(manga_path: Path) -> Set[Tuple[int, str]]:
 
 
 def _build_request_headers(domain: str, token: Optional[str]) -> Dict[str, str]:
-    # Строит заголовки для запроса к API.
     headers = {
         "accept": "application/json",
         "User-Agent": "Mozilla/5.0",
@@ -161,7 +143,6 @@ def _build_request_headers(domain: str, token: Optional[str]) -> Dict[str, str]:
 
 
 def _extract_chapter_entries(items: List[Any]) -> List[Dict[str, Any]]:
-    # Извлекает данные глав из ответа API.
     entries = []
     
     for pos, it in enumerate(items, start=1):
@@ -189,72 +170,17 @@ def _extract_chapter_entries(items: List[Any]) -> List[Dict[str, Any]]:
     return entries
 
 
-def _get_chapter_index(item: dict, fallback_pos: int) -> int:
-    # Получает индекс главы из элемента API.
-    idx_raw = item.get("index") or item.get("item_number")
-
-    try:
-        return int(idx_raw) if idx_raw is not None else fallback_pos
-    except (ValueError, TypeError):
-        return fallback_pos
-
-
-def _format_missing_tokens(missing_entries: List[Dict[str, Any]]) -> str:
-    # Форматирует список недостающих глав в строку токенов.
-    tokens = []
-    
-    for e in sorted(missing_entries, key=lambda x: (x.get("index") is None, x.get("index") or 0)):
-        if not isinstance(e, dict):
-            continue
-            
-        i = e.get("index")
-        v = e.get("volume")
-        n = e.get("number_str")
-        
-        if i is None or v is None or n is None:
-            continue
-            
-        tokens.append(f"{i}:{v}:{n}")
-        
-    return ", ".join(tokens)
-
-# CSV
-
 def save_to_csv(results: List[Dict[str, Any]], mode: str, domain: str) -> None:
-    # Сохраняет результаты проверки в CSV.
     current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    summary_header = [
-        "TIME", "SLUG", "DOMAIN", "MODE", "STATUS",
-        "LOCAL", "SERVER", "MISSING_COUNT", "MISSING"
-    ]
 
     try:
-        with open(CSV_FILE_NAME, mode='w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f, delimiter=';')
-            writer.writerow(summary_header)
-
-            for res in results:
-                missing_entries = res.get("missing_entries") or []
-                missing_str = _format_missing_tokens(missing_entries)
-
-                writer.writerow([
-                    current_time,
-                    res.get("slug", ""),
-                    domain,
-                    "CHECK_LOCAL" if mode == "check_local" else "ONLY_SERVER",
-                    res.get("status", ""),
-                    str(res.get("local_count", 0)),
-                    str(res.get("server_count", 0)),
-                    str(len(missing_entries)),
-                    missing_str,
-                ])
+        write_check_csv(CSV_FILE_NAME, results, mode, domain, timestamp=current_time)
 
         logger.info(f"Лог перезаписан: {CSV_FILE_NAME}")
-        
+
     except Exception as e:
         logger.error(f"Ошибка CSV: {e}")
 
-# API
 
 async def fetch_server_chapters(
     session: aiohttp.ClientSession,
@@ -263,7 +189,6 @@ async def fetch_server_chapters(
     token: Optional[str],
     domain: str
 ) -> Optional[List[Dict[str, Any]]]:
-    # Получает список глав с сервера.
     url = f"{config['api']}/{slug}/chapters"
     headers = _build_request_headers(domain, token)
 
@@ -295,25 +220,7 @@ async def fetch_server_chapters(
     return []
 
 
-def _extract_api_items(raw_data: Any) -> List[dict]:
-    # Извлекает список элементов из ответа API.
-    if isinstance(raw_data, list):
-        return raw_data
-        
-    if isinstance(raw_data, dict):
-        return (
-            raw_data.get('data') or
-            raw_data.get('items') or
-            raw_data.get('chapters') or
-            []
-        )
-        
-    return []
-
-# HTTP handlers
-
 async def handle_check(request: web.Request) -> web.Response:
-    # Обрабатывает запрос на проверку глав.
     try:
         data = await request.json()
         slugs = data.get('slugs', [])
@@ -327,7 +234,6 @@ async def handle_check(request: web.Request) -> web.Response:
 
         current_config = API_CONFIGS.get(domain, API_CONFIGS["mangalib.me"])
 
-        # Валидация токена
         if not _validate_token(domain, client_token):
             return web.json_response(
                 {"error": "Токен не найден. Обновите страницу (F5)!"},
@@ -348,15 +254,10 @@ async def handle_check(request: web.Request) -> web.Response:
 
 
 def _validate_token(domain: str, token: Optional[str]) -> bool:
-    # Проверяет наличие токена.
-    # Токен опционален для всех сайтов, но требуется для доступа к 18+ контенту
-    # Если токен предоставлен - принимаем его
-    # Если токена нет - продолжаем без него (доступен только обычный контент)
     return True
 
 
 def _log_mode_info(domain: str, token: Optional[str]) -> None:
-    # Логирует информацию о режиме работы.
     if "ranobelib.me" in domain:
         if token:
             logger.info(f"Режим: {domain.upper()} (Текстовые главы; токен получен)")
@@ -376,7 +277,6 @@ async def _process_slugs(
     token: Optional[str],
     domain: str
 ) -> List[Dict[str, Any]]:
-    # Обрабатывает список slug'ов.
     results = []
     base_path = Path(user_path) if user_path else None
 
@@ -404,7 +304,6 @@ async def _process_single_slug(
     token: Optional[str],
     domain: str
 ) -> Dict[str, Any]:
-    # Обрабатывает один slug.
     server_entries = await fetch_server_chapters(session, slug, config, token, domain)
 
     res = _create_initial_result(slug, server_entries)
@@ -415,7 +314,6 @@ async def _process_single_slug(
         manga_path = base_path / slug if base_path else None
         await _analyze_local_chapters(manga_path, server_entries, res)
 
-    # Формируем стабильный набор индексов
     missing_indices = sorted({
         e.get("index") for e in res["missing_entries"]
         if isinstance(e, dict) and isinstance(e.get("index"), int)
@@ -432,7 +330,6 @@ async def _process_single_slug(
 
 
 def _create_initial_result(slug: str, server_entries: Optional[List]) -> Dict[str, Any]:
-    # Создает начальную структуру результата.
     return {
         "slug": slug,
         "server_count": len(server_entries) if server_entries else 0,
@@ -449,7 +346,6 @@ async def _analyze_local_chapters(
     server_entries: List[Dict[str, Any]],
     res: Dict[str, Any]
 ) -> None:
-    # Анализирует локальные главы и находит недостающие.
     if manga_path and manga_path.exists():
         local_keys = get_local_chapters(manga_path)
         res["local_count"] = len(local_keys)
@@ -469,18 +365,14 @@ async def _analyze_local_chapters(
         res["local_count"] = 0
         res["missing_entries"] = list(server_entries) if server_entries else []
 
-# websocket и logging
 
 async def handle_logs_ws(request: web.Request) -> web.WebSocketResponse:
-    # WebSocket endpoint для логов в реальном времени.
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    # Отправляем текущий буфер
     for msg in log_buffer:
         await ws.send_str(json.dumps({"type": "log", "message": msg}))
 
-    # Подписываемся на новые логи
     last_pos = len(log_buffer)
     
     try:
@@ -503,16 +395,13 @@ async def handle_logs_ws(request: web.Request) -> web.WebSocketResponse:
 
 
 async def handle_logs(request: web.Request) -> web.Response:
-    # HTTP endpoint для получения логов (polling).
     return web.json_response(
         {"logs": list(log_buffer)},
         headers={"X-Log-Endpoint": "true"}
     )
 
-# Приложение
 
 async def add_cors(app: web.Application, res: web.Response) -> web.Response:
-    # Добавляет CORS заголовки к ответу.
     res.headers["Access-Control-Allow-Origin"] = "*"
     res.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
     res.headers["Access-Control-Allow-Headers"] = "Content-Type"

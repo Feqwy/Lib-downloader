@@ -10,47 +10,55 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
 from config import Config
+from csv_contract import (
+    parse_missing_indices as _parse_missing_indices,
+    parse_task_row as _parse_csv_row,
+)
 from downloader import ChapterDownloader
-from utils import parse_yes_no, clear_console, extract_slug_from_url, get_api_config_for_domain, is_token_required
+from reporting import create_reporter, get_reporter, set_reporter
+from sites import DEFAULT_SITE, SOURCE_CHOICES, detect_cli_site, get_site
+from text_render import parse_text_output
+from utils import (
+    configure_utf8_console,
+    parse_yes_no,
+    clear_console,
+    extract_slug_from_url,
+    get_api_config_for_domain,
+    is_token_required,
+)
 
-# Глобальные переменные сервера
 
 _server_process: Optional[subprocess.Popen] = None
 _server_thread: Optional[threading.Thread] = None
 _server_started = threading.Event()
 
-# Утилиты консоли
 
-def configure_utf8_console() -> None:
-    # Настраивает UTF-8 кодировку для консоли.
-    try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
+def _close_reporter() -> None:
+    close = getattr(get_reporter(), "close", None)
+    if callable(close):
+        close()
+
+
+def _read_input(prompt: str = "") -> str:
+    _close_reporter()
+    return input(prompt)
 
 
 def print_header() -> None:
-    # Выводит основной заголовок.
     print()
     print("=" * 50)
 
 
 def print_section(title: str) -> None:
-    # Выводит заголовок секции.
     print()
     print(title)
 
 
 def print_info(message: str) -> None:
-    # Выводит информационное сообщение.
     print(f"  → {message}")
 
 
 def print_launcher_header() -> None:
-    # Выводит заголовок лаунчера.
     print("=" * 50)
     print("       MangaLib Downloader Launcher")
     print("=" * 50)
@@ -60,10 +68,9 @@ def print_launcher_header() -> None:
 
 
 def print_main_menu() -> None:
-    # Выводит главное меню.
     clear_console()
     print(f"╔══════════════════════════════════════════╗")
-    print(f"║         MangaLib Downloader v1.0         ║")
+    print(f"║         MangaLib Downloader v2.0.0       ║")
     print(f"╚══════════════════════════════════════════╝")
     print()
     print("Выберите режим:")
@@ -73,10 +80,8 @@ def print_main_menu() -> None:
     print("  4. Остановить сервер")
     print("  5. Выход")
 
-# Управление сервером
 
 def is_server_running(host: str = "127.0.0.1", port: int = 8080) -> bool:
-    # Проверяет, запущен ли сервер на указанном порту.
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
@@ -88,7 +93,6 @@ def is_server_running(host: str = "127.0.0.1", port: int = 8080) -> bool:
 
 
 def run_server_thread(server_log_path: str) -> None:
-    # Запускает сервер в потоке.
     import logging
     from aiohttp import web
     from server import app, logger as server_logger
@@ -120,22 +124,18 @@ def run_server_thread(server_log_path: str) -> None:
 
 
 def start_background_server() -> Optional[subprocess.Popen]:
-    # Запускает сервер в фоновом режиме.
     global _server_thread
 
     script_dir = Path(__file__).parent
     _server_started.clear()
 
-    # Запуск в потоке для frozen executable
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return _start_server_in_thread()
 
-    # Запуск как отдельный процесс
     return _start_server_as_process(script_dir)
 
 
 def _start_server_in_thread() -> Optional[subprocess.Popen]:
-    # Запускает сервер в потоке.
     global _server_thread
 
     try:
@@ -147,23 +147,22 @@ def _start_server_in_thread() -> Optional[subprocess.Popen]:
         _server_thread.start()
 
         if _server_started.wait(timeout=10):
-            print("Server started successfully in background thread")
+            get_reporter().line("Server started successfully in background thread")
             return None
         else:
-            print("Warning: Server thread failed to start within timeout")
+            get_reporter().warning("Server thread failed to start within timeout")
             return None
 
     except Exception as e:
-        print(f"Error starting server thread: {e}")
+        get_reporter().line(f"Error starting server thread: {e}")
         return None
 
 
 def _start_server_as_process(script_dir: Path) -> Optional[subprocess.Popen]:
-    # Запускает сервер как отдельный процесс.
     server_script = script_dir / "server.py"
 
     if not server_script.exists():
-        print(f"Warning: server.py not found at {server_script}")
+        get_reporter().warning(f"server.py not found at {server_script}")
         return None
 
     try:
@@ -177,26 +176,25 @@ def _start_server_as_process(script_dir: Path) -> Optional[subprocess.Popen]:
         time.sleep(2)
 
         if is_server_running():
-            print(f"Server started successfully (PID: {process.pid})")
+            get_reporter().line(f"Server started successfully (PID: {process.pid})")
             return process
         else:
-            print("Warning: Server may have failed to start")
+            get_reporter().warning("Server may have failed to start")
             return None
 
     except Exception as e:
-        print(f"Error starting server: {e}")
+        get_reporter().line(f"Error starting server: {e}")
         return None
 
 
 def stop_background_server() -> None:
-    # Останавливает фоновый сервер.
     global _server_process, _server_thread
 
     if _server_process is not None:
         try:
             _server_process.terminate()
             _server_process.wait(timeout=3)
-            print("Background server stopped.")
+            get_reporter().line("Background server stopped.")
         except Exception:
             try:
                 _server_process.kill()
@@ -208,7 +206,6 @@ def stop_background_server() -> None:
 
 
 def open_log_viewer() -> None:
-    # Открывает просмотрщик логов в новом окне.
     script_dir = Path(__file__).parent
 
     try:
@@ -225,63 +222,89 @@ def open_log_viewer() -> None:
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
                 cwd=str(script_dir)
             )
-        print("Log viewer opened in new window.")
+        get_reporter().line("Log viewer opened in new window.")
 
     except Exception as e:
-        print(f"Error opening log viewer: {e}")
+        get_reporter().line(f"Error opening log viewer: {e}")
 
 
 def signal_handler(signum, frame) -> None:
-    # Обработчик сигналов завершения.
-    print("\nShutting down...")
+    get_reporter().line()
+    get_reporter().line("Shutting down...")
     stop_background_server()
     sys.exit(0)
 
-# Конфигурация
 
-def prompt_batch_config() -> Config:
-    # Запрашивает настройки для пакетной загрузки.
-    print_header()
-    print_section("Настройки пакетной загрузки")
-    print_header()
+def _prompt_download_options(
+    include_title: bool = False,
+    text_site: bool = False,
+) -> Dict[str, Any]:
+    title_override = None
 
-    api_config = _prompt_api_selection()
-    
     try:
-        max_chapters = int(input(f"\nМакс. глав одновременно [по умолчанию 1]: ").strip() or "1")
-        max_images = int(input(f"Макс. изображений одновременно [по умолчанию 5]: ").strip() or "5")
-        delay = float(input(f"Задержка между запросами (сек) [по умолчанию 0.5]: ").strip() or "0.5")
+        if include_title:
+            title_override = _read_input(f"Название манги [Enter — по умолчанию]: ").strip() or None
+        max_chapters = int(_read_input(f"\nМакс. глав одновременно [по умолчанию 1]: ").strip() or "1")
+        max_images = int(_read_input(f"Макс. изображений одновременно [по умолчанию 5]: ").strip() or "5")
+        delay = float(_read_input(f"Задержка между запросами (сек) [по умолчанию 0.5]: ").strip() or "0.5")
     except ValueError:
         print(f"\nНеверное число, используются значения по умолчанию")
+        if include_title:
+            title_override = None
         max_chapters, max_images, delay = 1, 5, 0.5
 
-    output_dir_input = input(f"\nДиректория для загрузки [по умолчанию downloads]: ").strip()
+    output_dir_input = _read_input(f"\nДиректория для загрузки [по умолчанию downloads]: ").strip()
     output_dir = Path(output_dir_input) if output_dir_input else Path("downloads")
 
     pack_cbz = _prompt_yes_no("Собирать CBZ архивы", "n")
     generate_metadata = _prompt_yes_no("Создавать метаданные (ComicInfo)", "n")
 
+    text_output = "both"
+    if text_site:
+        text_output = parse_text_output(
+            _read_input(
+                "Формат текстовых глав [1 — оба файла (по умолчанию), "
+                "2 — только TXT, 3 — только HTML]: "
+            )
+        )
+
+    return {
+        "series_title_override": title_override,
+        "max_chapters": max_chapters,
+        "max_images": max_images,
+        "delay": delay,
+        "output_dir": output_dir,
+        "pack_cbz": pack_cbz,
+        "generate_metadata": generate_metadata,
+        "text_output": text_output,
+    }
+
+
+def prompt_batch_config() -> Config:
+    print_header()
+    print_section("Настройки пакетной загрузки")
+    print_header()
+
+    api_config = _prompt_api_selection()
+    options = _prompt_download_options(
+        text_site=api_config.get("site_type") == "ranobelib"
+    )
+
     return _create_config(
         manga_slug="dummy-batch-slug",
         chapter_range=(0, 0),
         extra_chapters=[],
-        max_chapters=max_chapters,
-        max_images=max_images,
-        delay=delay,
-        output_dir=output_dir,
-        pack_cbz=pack_cbz,
-        generate_metadata=generate_metadata,
-        api_config=api_config
+        api_config=api_config,
+        **options
     )
 
 
 def prompt_user_config() -> Config:
-    # Запрашивает настройки для ручной загрузки.
     print_header()
     print_section("Настройки ручной загрузки")
     print_header()
 
-    manga_url = input(f"\nСсылка на мангу: ").strip()
+    manga_url = _read_input(f"\nСсылка на мангу: ").strip()
     manga_slug = extract_slug_from_url(manga_url)
     
     api_config = _detect_api_config_from_url(manga_url)
@@ -289,115 +312,72 @@ def prompt_user_config() -> Config:
     print(f"\n  → Slug: {manga_slug}")
 
     try:
-        start = int(input(f"\nНачальный индекс главы: "))
-        end = int(input(f"Конечный индекс главы: "))
+        start = int(_read_input(f"\nНачальный индекс главы: "))
+        end = int(_read_input(f"Конечный индекс главы: "))
     except ValueError:
         print(f"\nНеверный ввод, используется диапазон 1-1")
         start, end = 1, 1
 
     extra_chapters = _prompt_extra_chapters()
-    
-    try:
-        title_override = input(f"Название манги [Enter — по умолчанию]: ").strip() or None
-        max_chapters = int(input(f"Макс. глав одновременно [по умолчанию 1]: ").strip() or "1")
-        max_images = int(input(f"Макс. изображений одновременно [по умолчанию 5]: ").strip() or "5")
-        delay = float(input(f"Задержка между запросами (сек) [по умолчанию 0.5]: ").strip() or "0.5")
-    except ValueError:
-        print(f"\nНеверное число, используются значения по умолчанию")
-        title_override, max_chapters, max_images, delay = None, 1, 5, 0.5
-
-    output_dir_input = input(f"\nДиректория для загрузки [по умолчанию downloads]: ").strip()
-    output_dir = Path(output_dir_input) if output_dir_input else Path("downloads")
-
-    pack_cbz = _prompt_yes_no("Собирать CBZ архивы", "n")
-    generate_metadata = _prompt_yes_no("Создавать метаданные (ComicInfo)", "n")
+    options = _prompt_download_options(
+        include_title=True,
+        text_site=api_config.get("site_type") == "ranobelib",
+    )
 
     return _create_config(
         manga_slug=manga_slug,
         chapter_range=(start, end),
         extra_chapters=extra_chapters,
-        series_title_override=title_override,
-        max_chapters=max_chapters,
-        max_images=max_images,
-        delay=delay,
-        output_dir=output_dir,
-        pack_cbz=pack_cbz,
-        generate_metadata=generate_metadata,
-        api_config=api_config
+        api_config=api_config,
+        **options
     )
 
 
-def _prompt_api_selection() -> Dict[str, Any]:
-    # Запрашивает выбор API у пользователя.
-    print(f"\nВыберите источник API:")
-    print(f"  1. MangaLib (mangalib.me)")
-    print(f"  2. SlashLib (v2.shlib.life)")
-    print(f"  3. RanobeLib (ranobelib.me)")
-    print(f"  4. HentaiLib (hentailib.me)")
+def _prompt_token_for_site(site) -> Optional[str]:
+    for hint in site.token_hints:
+        print_info(hint)
+    return _read_input(f"Токен [Enter — без токена]: ").strip() or None
 
-    api_choice = input(f"\nВаш выбор [1-4, по умолчанию 1]: ").strip() or "1"
 
-    if api_choice == "2":
-        print_info("Выбран API SlashLib")
-        config = get_api_config_for_domain("v2.shlib.life")
-        print_info("Требуется Bearer Token (можно получить через расширение)")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
-    elif api_choice == "3":
-        print_info("Выбран API RanobeLib")
-        config = get_api_config_for_domain("ranobelib.me")
-        print_info("Текстовые главы, без изображений")
-        print_info("Для доступа к 18+ контенту требуется Bearer Token")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
-    elif api_choice == "4":
-        print_info("Выбран API HentaiLib")
-        config = get_api_config_for_domain("hentailib.me")
-        print_info("Требуется Bearer Token (можно получить через расширение)")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
-    else:
-        print_info("Выбран API MangaLib")
-        config = get_api_config_for_domain("mangalib.me")
-        print_info("Для доступа к 18+ контенту требуется Bearer Token")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
+def _api_config_for_site(site) -> Dict[str, Any]:
+    config = site.as_api_dict()
+    config["auth_token"] = _prompt_token_for_site(site)
     return config
+
+
+def _prompt_api_selection() -> Dict[str, Any]:
+    print(f"\nВыберите источник API:")
+    for index, (domain, label) in enumerate(SOURCE_CHOICES, start=1):
+        print(f"  {index}. {label} ({domain})")
+
+    api_choice = _read_input(f"\nВаш выбор [1-4, по умолчанию 1]: ").strip() or "1"
+
+    try:
+        choice_index = int(api_choice)
+    except ValueError:
+        choice_index = 1
+
+    if not 1 <= choice_index <= len(SOURCE_CHOICES):
+        choice_index = 1
+
+    site = get_site(SOURCE_CHOICES[choice_index - 1][0])
+    print_info(f"Выбран API {site.label}")
+    return _api_config_for_site(site)
 
 
 def _detect_api_config_from_url(manga_url: str) -> Dict[str, Any]:
-    # Определяет конфигурацию API из URL.
-    if "v2.shlib.life" in manga_url:
-        print_info("Обнаружена ссылка на SlashLib")
-        config = get_api_config_for_domain("v2.shlib.life")
-        print_info("Требуется Bearer Token (можно получить через расширение)")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+    site = detect_cli_site(manga_url)
 
-    elif "hentailib.me" in manga_url:
-        print_info("Обнаружена ссылка на HentaiLib")
-        config = get_api_config_for_domain("hentailib.me")
-        print_info("Требуется Bearer Token (можно получить через расширение)")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
-    elif "ranobelib.me" in manga_url:
-        print_info("Обнаружена ссылка на RanobeLib")
-        config = get_api_config_for_domain("ranobelib.me")
-        print_info("Текстовые главы, без изображений")
-        print_info("Для доступа к 18+ контенту требуется Bearer Token")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
-
-    else:
+    if site is DEFAULT_SITE:
         print_info("Используется API MangaLib")
-        config = get_api_config_for_domain("mangalib.me")
-        print_info("Для доступа к 18+ контенту требуется Bearer Token")
-        config["auth_token"] = input(f"Токен [Enter — без токена]: ").strip() or None
+    else:
+        print_info(f"Обнаружена ссылка на {site.label}")
 
-    return config
+    return _api_config_for_site(site)
 
 
 def _prompt_extra_chapters() -> Optional[List[float]]:
-    # Запрашивает дополнительные главы.
-    extra_chapters_input = input(
+    extra_chapters_input = _read_input(
         f"Дополнительные главы [например 0.5, 10.1, Enter — пропустить]: "
     ).strip()
     
@@ -415,8 +395,7 @@ def _prompt_extra_chapters() -> Optional[List[float]]:
 
 
 def _prompt_yes_no(prompt: str, default: str = "n") -> bool:
-    # Запрашивает ответ y/n.
-    response = input(f"{prompt} (y/n, по умолчанию {default}): ").strip().lower() or default
+    response = _read_input(f"{prompt} (y/n, по умолчанию {default}): ").strip().lower() or default
     return parse_yes_no(response, default)
 
 
@@ -431,9 +410,9 @@ def _create_config(
     output_dir: Path = Path("downloads"),
     pack_cbz: bool = False,
     generate_metadata: bool = False,
+    text_output: str = "both",
     api_config: Optional[Dict[str, Any]] = None
 ) -> Config:
-    # Создает конфигурацию.
     if api_config is None:
         api_config = get_api_config_for_domain("mangalib.me")
     
@@ -449,6 +428,7 @@ def _create_config(
         cleanup_temp=True,
         pack_cbz=pack_cbz,
         generate_metadata=generate_metadata,
+        text_output=text_output,
         api_base=api_config["api"],
         image_host=api_config["image_host"],
         referer=api_config["referer"],
@@ -456,92 +436,35 @@ def _create_config(
         site_type=api_config["site_type"],
     )
 
-# CSV
 
 def read_csv_tasks(csv_path: Path) -> List[Dict[str, Any]]:
-    # Читает задачи из CSV файла.
     tasks = []
 
     try:
         with open(csv_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f, delimiter=';')
             for row in reader:
-                task = _parse_csv_row(row)
+                task = _parse_csv_row(row, on_warning=get_reporter().warning)
                 if task:
                     tasks.append(task)
 
     except FileNotFoundError:
-        print(f"Error: CSV file not found at {csv_path}")
+        get_reporter().error(f"CSV file not found at {csv_path}")
     except Exception as e:
-        print(f"Error reading CSV: {e}")
+        get_reporter().line(f"Error reading CSV: {e}")
         import traceback
         traceback.print_exc()
 
-    print(f"\nTotal tasks extracted from CSV: {len(tasks)}")
+    get_reporter().line()
+    get_reporter().line(f"Total tasks extracted from CSV: {len(tasks)}")
     return tasks
 
 
-def _parse_csv_row(row: Dict[str, str]) -> Optional[Dict[str, Any]]:
-    # Парсит одну строку CSV.
-    slug = (row.get('SLUG') or row.get('slug') or "").strip()
-    if not slug:
-        return None
-
-    # Новый формат: MISSING = "index:volume:number, ..."
-    missing_str = (row.get('MISSING') or "").strip()
-    if missing_str:
-        indices = _parse_missing_indices(missing_str)
-        if indices:
-            return {'slug': slug, 'chapters': indices}
-
-    # Старый формат
-    status = row.get('СТАТУС', '') or ""
-    missing_chapters_str = (row.get('ПРОПУЩЕННЫЕ_ГЛАВЫ', '') or '').strip()
-    
-    if "Не хватает" in status and missing_chapters_str:
-        try:
-            missing_chapters = [
-                float(c.strip())
-                for c in missing_chapters_str.split(',')
-                if c.strip()
-            ]
-            if missing_chapters:
-                return {'slug': slug, 'chapters': missing_chapters}
-        except ValueError:
-            print(f"Warning: Could not parse chapter numbers for {slug}. Skipping.")
-
-    return None
-
-
-def _parse_missing_indices(missing_str: str) -> List[float]:
-    # Парсит строку недостающих индексов.
-    indices: List[float] = []
-
-    for token in missing_str.split(','):
-        token = token.strip()
-        if not token:
-            continue
-            
-        parts = token.split(':')
-        if not parts:
-            continue
-            
-        try:
-            idx = int(parts[0].strip())
-            indices.append(float(idx))
-        except ValueError:
-            continue
-            
-    return indices
-
-# Основная логика
-
 async def update_from_csv(csv_path: Path) -> None:
-    # Выполняет пакетное обновление из CSV.
     tasks = read_csv_tasks(csv_path)
 
     if not tasks:
-        print("Не найдено тайтлов для обновления в CSV. Выход.")
+        get_reporter().line("Не найдено тайтлов для обновления в CSV. Выход.")
         return
 
     clear_console()
@@ -549,24 +472,20 @@ async def update_from_csv(csv_path: Path) -> None:
     try:
         base_cfg = prompt_batch_config()
     except Exception as e:
-        print(f"Ошибка при получении базовой конфигурации: {e}. Невозможно продолжить.")
+        get_reporter().line(
+            f"Ошибка при получении базовой конфигурации: {e}. "
+            f"Невозможно продолжить."
+        )
         return
 
     clear_console()
-    print(f"Найдено {len(tasks)} тайтлов для обновления. Начинаем загрузку по очереди...")
+    get_reporter().batch_started(len(tasks))
 
     for i, task in enumerate(tasks, 1):
         slug = task['slug']
         chapters = task['chapters']
 
-        if chapters:
-            chapters_str = ', '.join(
-                str(int(x)) if float(x).is_integer() else str(x)
-                for x in chapters
-            )
-            print(f"\n[Задача {i}/{len(tasks)}] >>> Начинаем обновление тайтла: {slug} (Индексы: {chapters_str})")
-        else:
-            print(f"\n[Задача {i}/{len(tasks)}] >>> Начинаем загрузку тайтла: {slug} (Все доступные главы)")
+        get_reporter().batch_task_started(i, len(tasks), slug, chapters)
 
         cfg_update = Config(
             manga_slug=slug,
@@ -582,24 +501,25 @@ async def update_from_csv(csv_path: Path) -> None:
             cleanup_temp=base_cfg.cleanup_temp,
             pack_cbz=base_cfg.pack_cbz,
             generate_metadata=base_cfg.generate_metadata,
+            text_output=base_cfg.text_output,
             api_base=base_cfg.api_base,
             image_host=base_cfg.image_host,
             referer=base_cfg.referer,
             auth_token=base_cfg.auth_token,
+            site_type=base_cfg.site_type,
         )
 
-        downloader = ChapterDownloader(cfg_update)
+        downloader = ChapterDownloader(cfg_update, get_reporter())
         await downloader.download_chapters()
 
-        print(f"[Задача {i}/{len(tasks)}] <<< Завершено обновление тайтла: {slug}")
+        get_reporter().batch_task_finished(i, len(tasks), slug)
 
 
 async def main_loop() -> None:
-    # Основной цикл приложения.
     while True:
         print_main_menu()
 
-        mode = input("\nВаш выбор [1-5, по умолчанию 1]: ").strip() or "1"
+        mode = _read_input("\nВаш выбор [1-5, по умолчанию 1]: ").strip() or "1"
 
         if mode == "2":
             csv_path = Path("chapter_checker_log.csv")
@@ -610,33 +530,33 @@ async def main_loop() -> None:
             continue
             
         elif mode == "4":
-            print()
+            get_reporter().line()
             stop_background_server()
-            input("Нажмите Enter для продолжения...")
+            _read_input("Нажмите Enter для продолжения...")
             continue
             
         elif mode == "5":
-            print()
+            get_reporter().line()
             break
             
         else:
             cfg = prompt_user_config()
-            downloader = ChapterDownloader(cfg)
+            downloader = ChapterDownloader(cfg, get_reporter())
             await downloader.download_chapters()
 
 
 async def main() -> None:
-    # Точка входа приложения.
     configure_utf8_console()
+    set_reporter(create_reporter())
     print_launcher_header()
 
     global _server_process
     server_running = is_server_running()
 
     if server_running:
-        print("✓ Сервер уже запущен на порту 8080")
+        get_reporter().line("✓ Сервер уже запущен на порту 8080")
     else:
-        print("Запуск фонового сервера...")
+        get_reporter().line("Запуск фонового сервера...")
         _server_process = start_background_server()
 
     await asyncio.sleep(0.5)
@@ -645,15 +565,14 @@ async def main() -> None:
     try:
         await main_loop()
     finally:
+        _close_reporter()
         stop_background_server()
 
-# Запуск
 
 if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Запуск в режиме просмотра логов
     if "--log-viewer" in sys.argv:
         from log_viewer import main as log_viewer_main
         log_viewer_main()
@@ -662,8 +581,11 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nОперация отменена пользователем.")
+        _close_reporter()
+        get_reporter().line()
+        get_reporter().line("Операция отменена пользователем.")
         stop_background_server()
     except Exception as e:
-        print(f"Произошла непредвиденная ошибка: {e}")
+        _close_reporter()
+        get_reporter().line(f"Произошла непредвиденная ошибка: {e}")
         stop_background_server()

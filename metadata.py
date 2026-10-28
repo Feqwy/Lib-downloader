@@ -7,7 +7,6 @@ from models import ChapterInfo
 from config import Config
 
 
-# Генерирует метаданные в форматах ComicInfo.xml и JSON.
 class MetadataGenerator:
     
     STATUS_MAP = {
@@ -32,11 +31,9 @@ class MetadataGenerator:
     }
 
     def __init__(self, cfg: Config):
-        # Инициализирует генератор.
         self.cfg = cfg
 
     def create_chapter_comicinfo(self, info: ChapterInfo) -> bytes:
-        # Создает ComicInfo.xml для главы.
         root = ET.Element("ComicInfo")
 
         ET.SubElement(root, "Title").text = info.name or f"Chapter {info.number}"
@@ -54,7 +51,6 @@ class MetadataGenerator:
         return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
     def create_series_comicinfo(self, series_title: str, series_info: Dict[str, Any]) -> bytes:
-        # Создает ComicInfo.xml для серии.
         root = ET.Element("ComicInfo")
 
         ET.SubElement(root, "Title").text = series_title
@@ -98,7 +94,6 @@ class MetadataGenerator:
         chapter_count: int,
         series_info: Dict[str, Any]
     ) -> bytes:
-        # Создает ComicInfo.xml для тома.
         root = ET.Element("ComicInfo")
 
         ET.SubElement(root, "Title").text = f"Volume {volume:02d}"
@@ -127,7 +122,6 @@ class MetadataGenerator:
         return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
     def create_series_json(self, series_title: str, series_info: Dict[str, Any]) -> str:
-        # Создает JSON метаданные для серии.
         name = self._get_series_name(series_title, series_info)
         comicid = self._get_series_comicid(series_info)
         summary = self._get_series_summary(series_info)
@@ -167,7 +161,6 @@ class MetadataGenerator:
         return json.dumps(series_dict, ensure_ascii=False, indent=2)
 
     def _get_series_name(self, series_title: str, series_info: Dict[str, Any]) -> str:
-        # Получает название серии.
         if series_title:
             return series_title
 
@@ -178,7 +171,6 @@ class MetadataGenerator:
         )
 
     def _get_series_comicid(self, series_info: Dict[str, Any]) -> str:
-        # Получает ID серии.
         return str(
             series_info.get("id") or
             series_info.get("manga_id") or
@@ -186,7 +178,6 @@ class MetadataGenerator:
         )
 
     def _get_series_summary(self, series_info: Dict[str, Any]) -> str:
-        # Получает описание серии.
         return (
             series_info.get("summary") or
             series_info.get("description") or
@@ -195,7 +186,6 @@ class MetadataGenerator:
         )
 
     def _extract_names(self, items: Any) -> List[str]:
-        # Извлекает имена из списка объектов или строк.
         if items is None:
             return []
             
@@ -219,7 +209,6 @@ class MetadataGenerator:
         return names
 
     def _get_first_string(self, obj: Any) -> str:
-        # Получает первую строку из объекта (список, dict, скаляр).
         if not obj:
             return ""
 
@@ -236,10 +225,8 @@ class MetadataGenerator:
         return str(obj)
 
     def _extract_authors(self, series_info: Dict[str, Any]) -> List[Dict[str, str]]:
-        # Извлекает авторов и художников.
         authors_list = []
 
-        # Авторы
         for author in self._ensure_list(series_info.get("authors") or series_info.get("author")):
             if isinstance(author, dict):
                 authors_list.append({
@@ -249,7 +236,6 @@ class MetadataGenerator:
             else:
                 authors_list.append({"name": str(author), "role": "Writer"})
 
-        # Художники
         for artist in self._ensure_list(series_info.get("artists") or series_info.get("artist")):
             if isinstance(artist, dict):
                 authors_list.append({
@@ -262,11 +248,9 @@ class MetadataGenerator:
         return authors_list
 
     def _ensure_list(self, value: Any) -> List[Any]:
-        # Гарантирует, что значение является списком.
         return value if isinstance(value, list) else [value] if value else []
 
     def _extract_year_info(self, series_info: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
-        # Извлекает год и дату релиза.
         year = series_info.get("releaseDate") or series_info.get("year") or ""
 
         if isinstance(year, str) and re.match(r"^\d{4}-\d{2}-\d{2}", year):
@@ -281,9 +265,6 @@ class MetadataGenerator:
             return year_val, f"{year_val}-01-01" if year_val else ""
 
     def _extract_age_rating(self, series_info: Dict[str, Any]) -> str:
-        # Извлекает возрастной рейтинг.
-        # series_info: Данные серии.
-        # Returns: Возрастной рейтинг.
         age = series_info.get("ageRestriction", {})
         age_label = age.get("label") if isinstance(age, dict) else age
         age_label = age_label or series_info.get("age_rating") or ""
@@ -293,7 +274,6 @@ class MetadataGenerator:
 
         age_str = str(age_label)
         
-        # Проверяем по ключевым словам
         for key, rating in self.AGE_RATING_MAP.items():
             if key in age_str:
                 return rating
@@ -301,7 +281,6 @@ class MetadataGenerator:
         return age_str
 
     def _get_language(self, series_info: Dict[str, Any]) -> str:
-        # Определяет язык по типу манги.
         type_info = series_info.get("type", {})
         type_label = type_info.get("label", "") if isinstance(type_info, dict) else ""
 
@@ -312,7 +291,6 @@ class MetadataGenerator:
         return "en"
 
     def _get_country(self, series_info: Dict[str, Any]) -> str:
-        # Определяет страну происхождения.
         type_info = series_info.get("type", {})
         type_label = type_info.get("label", "") if isinstance(type_info, dict) else ""
 
@@ -323,13 +301,11 @@ class MetadataGenerator:
         return "US"
 
     def _get_comic_age_rating(self, series_info: Dict[str, Any]) -> str:
-        # Получает рейтинг в формате ComicInfo.
         age = series_info.get("ageRestriction", {})
         age_label = age.get("label", "") if isinstance(age, dict) else ""
 
         return self.COMIC_AGE_RATING_MAP.get(age_label, "EVERYONE")
 
     def _get_readable_status(self, series_info: Dict[str, Any]) -> str:
-        # Получает читаемый статус серии.
         status_id = series_info.get("status", {}).get("id", 0)
         return self.STATUS_MAP.get(status_id, "Hiatus")

@@ -10,13 +10,22 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any, Union
 
 from PIL import Image
-from tqdm.asyncio import tqdm as async_tqdm
 
 from config import Config
-from colors import Colors
 from models import ChapterInfo
 from api_client import MangaAPIClient
 from metadata import MetadataGenerator
+from naming import chapter_dir_name, series_title_from_meta, volume_dir_name
+from reporting import ConsoleReporter, Reporter
+from text_render import (
+    TEXT_OUTPUT_BOTH,
+    TEXT_OUTPUT_CHOICES,
+    TEXT_OUTPUT_HTML,
+    TEXT_OUTPUT_TXT,
+    render_chapter_html,
+    render_chapter_txt,
+    resolve_text_output,
+)
 from utils import (
     format_chapter_number,
     sanitize_filename,
@@ -26,7 +35,6 @@ from utils import (
 
 
 def convert_gif_to_png(image_bytes: bytes) -> bytes:
-    # Конвертирует GIF изображение в PNG.
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode in ("P", "RGBA"):
         img = img.convert("RGB")
@@ -36,7 +44,6 @@ def convert_gif_to_png(image_bytes: bytes) -> bytes:
 
 
 def convert_ranobelib_content_to_html(content: Dict[str, Any]) -> str:
-    # Преобразует контент RanobeLib в HTML.
     if not isinstance(content, dict):
         return ""
 
@@ -74,7 +81,6 @@ def convert_ranobelib_content_to_html(content: Dict[str, Any]) -> str:
 
 
 def _apply_text_marks(text: str, marks: List[Dict[str, Any]]) -> str:
-    # Применяет форматирование к тексту (bold, italic, underline).
     formatted_text = text
     for mark in marks:
         mark_type = mark.get("type", "")
@@ -88,7 +94,6 @@ def _apply_text_marks(text: str, marks: List[Dict[str, Any]]) -> str:
 
 
 def _extract_heading_text(item: Dict[str, Any]) -> str:
-    # Извлекает текст из заголовка.
     heading_content = item.get("content", [])
     return "".join(
         t.get("text", "") for t in heading_content if t.get("type") == "text"
@@ -96,7 +101,6 @@ def _extract_heading_text(item: Dict[str, Any]) -> str:
 
 
 def convert_ranobelib_content_to_text(content: Dict[str, Any]) -> str:
-    # Преобразует контент RanobeLib в текст.
     if not isinstance(content, dict):
         return ""
 
@@ -126,29 +130,33 @@ def convert_ranobelib_content_to_text(content: Dict[str, Any]) -> str:
     return "".join(text_parts).strip()
 
 
-# Загрузчик глав
 class ChapterDownloader:
 
-    def __init__(self, cfg: Config):
-        # Инициализирует загрузчик.
+    def __init__(self, cfg: Config, reporter: Optional[Reporter] = None):
         self.cfg = cfg
+        self.reporter = reporter or ConsoleReporter()
         self.metadata_gen = MetadataGenerator(cfg)
+        self.text_output = resolve_text_output(cfg.text_output)
+        if cfg.text_output not in TEXT_OUTPUT_CHOICES:
+            self.reporter.warning(
+                f"Неизвестный формат текста {cfg.text_output!r}, "
+                f"используется {TEXT_OUTPUT_BOTH}"
+            )
         self.cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     async def download_chapters(self) -> List[Path]:
-        # Загружает главы согласно конфигурации.
         start, end = self.cfg.chapter_range
         self._print_header(start, end)
 
-        async with MangaAPIClient(self.cfg) as api:
+        async with MangaAPIClient(self.cfg, self.reporter) as api:
             try:
                 chapters_to_download = await self._resolve_chapter_list(api)
             except Exception as e:
-                print(Colors.error(f"Ошибка при определении списка глав: {e}"))
+                self.reporter.error(f"Ошибка при определении списка глав: {e}")
                 return []
 
             if not chapters_to_download:
-                print(Colors.warning("Список глав для загрузки пуст. Проверьте диапазон."))
+                self.reporter.warning("Список глав для загрузки пуст. Проверьте диапазон.")
                 return []
 
             series_meta = await api.fetch_series_info(self.cfg.manga_slug)
@@ -156,7 +164,7 @@ class ChapterDownloader:
             successful, failed_count = self._process_results(chapters_to_download, results)
 
             if not successful:
-                print(Colors.error("Не удалось загрузить ни одной главы"))
+                self.reporter.error("Не удалось загрузить ни одной главы")
                 return []
 
             series_title = self._determine_series_title(series_meta)
@@ -168,7 +176,6 @@ class ChapterDownloader:
             return [zip_path] if zip_path else []
 
     async def _resolve_chapter_list(self, api: MangaAPIClient) -> List[ChapterInfo]:
-        # Получает список глав для загрузки.
         start, end = self.cfg.chapter_range
         chapters = await api.to_chapter_info_list(
             slug=self.cfg.manga_slug,
@@ -176,7 +183,7 @@ class ChapterDownloader:
             end_num=float(end),
             extra=self.cfg.extra_chapters or []
         )
-        print(Colors.info(f"Найдено глав для загрузки (после проверки API): {len(chapters)}"))
+        self.reporter.chapters_total(len(chapters))
         return chapters
 
     async def download_chapter(
@@ -226,7 +233,7 @@ class ChapterDownloader:
             return target_dir, info
 
         except Exception as e:
-            print(Colors.error(f"Глава {req_number}: {e}"))
+            self.reporter.error(f"Глава {req_number}: {e}")
             self._cleanup_on_error(tmp_dir)
             return None
 
@@ -234,7 +241,6 @@ class ChapterDownloader:
         self,
         chapter_item: Union[ChapterInfo, int, float]
     ) -> tuple[Union[int, float], Any, Optional[int], int]:
-        # Извлекает данные из объекта главы.
         if isinstance(chapter_item, ChapterInfo):
             return (
                 chapter_item.number,
@@ -252,7 +258,6 @@ class ChapterDownloader:
         req_number: Union[int, float, str],
         chapter_name: str
     ) -> tuple[Path, Optional[Path]]:
-        # Подготавливает директорию для сохранения главы.
         if self.cfg.pack_cbz:
             tmp_dir = self.cfg.output_dir / f"_tmp_ch{req_number}_{int(time.time())}"
             tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -267,11 +272,9 @@ class ChapterDownloader:
         volume: int,
         chapter_num: Union[int, float]
     ) -> Path:
-        # Создает финальную директорию для главы.
         sanitized_series = sanitize_filename(series_title)
-        vol_name = f"Volume {int(volume):02d}"
-        chap_str = format_chapter_number(chapter_num)
-        chapter_name = f"Chapter {chap_str}"
+        vol_name = volume_dir_name(volume)
+        chapter_name = chapter_dir_name(chapter_num)
 
         final_dir = self.cfg.output_dir / sanitized_series / vol_name / chapter_name
         final_dir.mkdir(parents=True, exist_ok=True)
@@ -284,7 +287,6 @@ class ChapterDownloader:
         chapter_name: str,
         req_number: Union[int, float, str]
     ) -> None:
-        # Сохраняет контент RanobeLib (HTML + TXT).
         content = data.get("content", {})
         if not content:
             raise ValueError("No content found in chapter")
@@ -307,47 +309,21 @@ class ChapterDownloader:
         chapter_name: str,
         req_number: Union[int, float, str]
     ) -> None:
-        # Записывает файлы RanobeLib.
-        html_file = target_dir / "chapter.html"
-        html_template = f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{chapter_name or f"Chapter {req_number}"}</title>
-    <style>
-        body {{
-            font-family: 'Georgia', 'Times New Roman', serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.8;
-            color: #333;
-        }}
-        h1, h2, h3 {{
-            margin-top: 1.5em;
-            margin-bottom: 0.5em;
-        }}
-        p {{
-            margin-bottom: 1em;
-            text-align: justify;
-        }}
-    </style>
-</head>
-<body>
-    <h1>{chapter_name or f"Chapter {req_number}"}</h1>
-    {html_content}
-</body>
-</html>"""
-        html_file.write_text(html_template, encoding="utf-8")
+        if self.text_output in (TEXT_OUTPUT_BOTH, TEXT_OUTPUT_HTML):
+            html_file = target_dir / "chapter.html"
+            html_file.write_text(
+                render_chapter_html(chapter_name, req_number, html_content),
+                encoding="utf-8",
+            )
 
-        text_file = target_dir / "chapter.txt"
-        header = f"{chapter_name or f'Chapter {req_number}'}\n"
-        header += "=" * len(header.strip()) + "\n\n"
-        text_file.write_text(header + text_content, encoding="utf-8")
+        if self.text_output in (TEXT_OUTPUT_BOTH, TEXT_OUTPUT_TXT):
+            text_file = target_dir / "chapter.txt"
+            text_file.write_text(
+                render_chapter_txt(chapter_name, req_number, text_content),
+                encoding="utf-8",
+            )
 
     def _count_ranobelib_pages(self, data: Dict[str, Any]) -> int:
-        # Подсчитывает количество страниц в контенте RanobeLib.
         content = data.get("content", {})
         pages_count = len(
             [p for p in content.get("content", []) if p.get("type") == "paragraph"]
@@ -361,7 +337,6 @@ class ChapterDownloader:
         target_dir: Path,
         req_number: Union[int, float, str]
     ) -> int:
-        # Загружает и сохраняет изображения глав.
         pages = data.get("pages", []) or []
         if not pages:
             raise ValueError("No pages found")
@@ -382,7 +357,6 @@ class ChapterDownloader:
         return len(urls)
 
     def _extract_teams(self, data: Dict[str, Any]) -> List[str]:
-        # Извлекает названия команд из данных главы.
         return [
             t.get("name", "") for t in data.get("teams", []) if isinstance(t, dict)
         ]
@@ -399,7 +373,6 @@ class ChapterDownloader:
         teams: List[str],
         data: Dict[str, Any]
     ) -> ChapterInfo:
-        # Создает объект ChapterInfo.
         return ChapterInfo(
             number=chapter_num,
             number_str=str(req_number),
@@ -413,7 +386,6 @@ class ChapterDownloader:
         )
 
     def _cleanup_on_error(self, tmp_dir: Optional[Path]) -> None:
-        # Очищает временные файлы при ошибке.
         try:
             if tmp_dir and tmp_dir.exists():
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -427,7 +399,6 @@ class ChapterDownloader:
         chapter_dir: Path,
         chapter_num: Union[int, float, str]
     ) -> bool:
-        # Загружает изображения параллельно.
         sem = asyncio.Semaphore(self.cfg.max_concurrent_images)
 
         async def download_task(idx: int, url: str) -> bool:
@@ -438,24 +409,33 @@ class ChapterDownloader:
                     await api.download_image(url, dest)
                     return True
                 except Exception as e:
-                    print(Colors.error(
+                    self.reporter.error(
                         f"Не удалось загрузить страницу {idx} для главы {chapter_num}: {e}"
-                    ))
+                    )
                     return False
 
         tasks = [download_task(i + 1, url) for i, url in enumerate(urls)]
-        results = await async_tqdm.gather(
-            *tasks,
-            desc=f"  Downloading Ch{chapter_num}",
-            unit="img"
+        progress = self.reporter.progress_start(
+            len(tasks), f"  Downloading Ch{chapter_num}", unit="img"
         )
+
+        async def tracked(task):
+            try:
+                return await task
+            finally:
+                self.reporter.progress_update(progress)
+
+        try:
+            results = await asyncio.gather(*[tracked(task) for task in tasks])
+        finally:
+            self.reporter.progress_finish(progress)
 
         failed_downloads = sum(1 for res in results if res is not True)
 
         if failed_downloads > 0:
-            print(Colors.error(
+            self.reporter.error(
                 f"Глава {chapter_num}: не удалось загрузить {failed_downloads}/{len(urls)} изображений."
-            ))
+            )
             return False
 
         return True
@@ -465,16 +445,15 @@ class ChapterDownloader:
         api: MangaAPIClient,
         chapters: List[Union[ChapterInfo, int]]
     ) -> list:
-        # Загружает все главы параллельно с ограничением.
         sem = asyncio.Semaphore(self.cfg.max_concurrent_chapters)
 
         async def limited(ch):
             async with sem:
                 chapter_num = self._get_chapter_number_for_error(ch)
-                print(Colors.info(f"Загрузка главы {chapter_num}..."))
+                self.reporter.chapter_started(chapter_num)
                 result = await self.download_chapter(api, ch)
                 if result:
-                    print(Colors.success(f"Глава {chapter_num} загружена"))
+                    self.reporter.chapter_finished(chapter_num)
                 return result
 
         return await asyncio.gather(*[limited(ch) for ch in chapters], return_exceptions=True)
@@ -484,14 +463,13 @@ class ChapterDownloader:
         chapters: List[Any],
         results: list
     ) -> Tuple[list, int]:
-        # Обрабатывает результаты загрузки.
         successful = []
         failed_count = 0
         
         for ch, result in zip(chapters, results):
             if isinstance(result, Exception):
                 num = self._get_chapter_number_for_error(ch)
-                print(Colors.error(f"Глава {num}: {result}"))
+                self.reporter.error(f"Глава {num}: {result}")
                 failed_count += 1
             elif result:
                 successful.append(result)
@@ -499,7 +477,6 @@ class ChapterDownloader:
         return successful, failed_count
 
     def _get_chapter_number_for_error(self, ch: Any) -> Union[int, float, str]:
-        # Получает номер главы для сообщения об ошибке.
         if isinstance(ch, ChapterInfo):
             if hasattr(ch, "number_str"):
                 return ch.number_str
@@ -507,17 +484,11 @@ class ChapterDownloader:
         return ch
 
     def _determine_series_title(self, series_meta: dict) -> str:
-        # Определяет название серии.
-        return (
-            self.cfg.series_title_override or
-            series_meta.get("name") or
-            series_meta.get("rus_name") or
-            series_meta.get("eng_name") or
-            self.cfg.manga_slug
+        return series_title_from_meta(
+            series_meta, self.cfg.manga_slug, self.cfg.series_title_override
         )
 
     async def _get_series_title(self, api: MangaAPIClient, chapter_data: dict) -> str:
-        # Получает название серии из данных главы или API.
         if self.cfg.series_title_override:
             return self.cfg.series_title_override
             
@@ -545,7 +516,6 @@ class ChapterDownloader:
         series_meta: dict,
         api: MangaAPIClient
     ) -> Optional[Path]:
-        # Создает архив серии.
         sanitized_series = sanitize_filename(series_title)
         
         if not self.cfg.pack_cbz:
@@ -565,7 +535,6 @@ class ChapterDownloader:
         api: MangaAPIClient,
         sanitized_series: str
     ) -> Path:
-        # Организует папки без CBZ упаковки.
         series_folder = self.cfg.output_dir / sanitized_series
         series_folder.mkdir(parents=True, exist_ok=True)
         
@@ -587,7 +556,6 @@ class ChapterDownloader:
         api: MangaAPIClient,
         sanitized_series: str
     ) -> Path:
-        # Создает CBZ архив.
         temp_series_dir = self.cfg.output_dir / f"_tmp_series_{int(time.time())}"
         temp_series_dir.mkdir(parents=True, exist_ok=True)
         
@@ -613,12 +581,11 @@ class ChapterDownloader:
         series_title: str,
         series_meta: dict
     ) -> None:
-        # Обрабатывает тома серии.
         for volume in sorted(volume_groups):
             chapter_list = sorted(
                 volume_groups[volume], key=lambda x: x[1].index
             )
-            vol_name = f"Volume {int(volume):02d}"
+            vol_name = volume_dir_name(volume)
             vol_folder = series_folder / vol_name
             vol_folder.mkdir(parents=True, exist_ok=True)
             
@@ -640,7 +607,6 @@ class ChapterDownloader:
         chapter_count: int,
         series_meta: dict
     ) -> None:
-        # Создает метаданные для тома.
         try:
             vol_xml = self.metadata_gen.create_volume_comicinfo(
                 volume, series_title, chapter_count, series_meta
@@ -656,12 +622,11 @@ class ChapterDownloader:
         vol_folder: Path,
         series_folder: Path
     ) -> None:
-        # Обрабатывает директорию главы.
         chap_str = (
             info.number_str if hasattr(info, "number_str")
             else format_chapter_number(info.number)
         )
-        sanitized_chap = sanitize_filename(f"Chapter {chap_str}")
+        sanitized_chap = sanitize_filename(chapter_dir_name(chap_str))
         
         if self.cfg.pack_cbz:
             self._create_chapter_cbz(dir_path, info, vol_folder, sanitized_chap)
@@ -675,7 +640,6 @@ class ChapterDownloader:
         vol_folder: Path,
         sanitized_chap: str
     ) -> None:
-        # Создает CBZ архив для главы.
         cbz_path = vol_folder / f"{sanitized_chap}.cbz"
         self.create_cbz(dir_path, info, cbz_path)
         
@@ -691,7 +655,6 @@ class ChapterDownloader:
         vol_folder: Path,
         sanitized_chap: str
     ) -> None:
-        # Перемещает папку главы в том.
         target_folder = vol_folder / sanitized_chap
         
         if dir_path.exists() and dir_path != target_folder:
@@ -700,7 +663,6 @@ class ChapterDownloader:
             shutil.move(str(dir_path), str(target_folder))
 
     def create_cbz(self, src_dir: Path, info: ChapterInfo, cbz_path: Path) -> None:
-        # Создает CBZ архив из директории.
         try:
             cbz_path.parent.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(cbz_path, 'w', compression=zipfile.ZIP_STORED) as zf:
@@ -708,7 +670,7 @@ class ChapterDownloader:
                     if entry.is_file():
                         zf.write(entry, arcname=entry.name)
         except Exception as e:
-            print(Colors.error(f"Не удалось создать CBZ {cbz_path}: {e}"))
+            self.reporter.error(f"Не удалось создать CBZ {cbz_path}: {e}")
             raise
 
     async def _download_series_cover(
@@ -717,7 +679,6 @@ class ChapterDownloader:
         series_folder: Path,
         api: MangaAPIClient
     ) -> None:
-        # Загружает обложку серии.
         cover = series_meta.get("cover", {}) or {}
         cover_url = cover.get("default") if isinstance(cover, dict) else cover
         
@@ -737,7 +698,6 @@ class ChapterDownloader:
         series_title: str,
         series_meta: dict
     ) -> None:
-        # Создает метаданные серии.
         if self.cfg.generate_metadata:
             try:
                 series_json = self.metadata_gen.create_series_json(series_title, series_meta)
@@ -753,7 +713,6 @@ class ChapterDownloader:
         temp_series_dir: Path,
         sanitized_series: str
     ) -> Path:
-        # Создает финальный ZIP архив.
         zip_base = self.cfg.output_dir / sanitized_series
         shutil.make_archive(
             str(zip_base), 'zip',
@@ -767,36 +726,26 @@ class ChapterDownloader:
         successful: list,
         temp_series_dir: Path
     ) -> None:
-        # Очищает временные файлы.
         if self.cfg.cleanup_temp:
             if temp_series_dir.exists():
                 shutil.rmtree(temp_series_dir, ignore_errors=True)
 
     def _print_header(self, start: int, end: int) -> None:
-        # Выводит заголовок загрузки.
-        print(f"\n{Colors.BOLD}╔══════════════════════════════════════════╗{Colors.RESET}")
-        print(f"{Colors.BOLD}║              Lib Downloader v1.0         ║{Colors.RESET}")
-        print(f"{Colors.BOLD}╚══════════════════════════════════════════╝{Colors.RESET}")
-        
         series_info = self.cfg.series_title_override or f"{self.cfg.manga_slug} (from slug)"
-        print(f"\n{Colors.info(f'Series: {series_info}')}")
-        print(f"{Colors.info(f'Запрошенные индексы глав (API index): {start}-{end}')}")
-        
-        if self.cfg.extra_chapters:
-            print(f"{Colors.info(f'Дополнительные главы: {self.cfg.extra_chapters}')}")
-            
-        if self.cfg.is_ranobelib:
-            print(f"{Colors.info(f'Режим: Текстовые главы (RanobeLib)')}")
-            
-        print(f"{Colors.info(f'Параллельность: {self.cfg.max_concurrent_chapters} глав, {self.cfg.max_concurrent_images} изображений')}\n")
+        self.reporter.series_header(
+            series_info,
+            start,
+            end,
+            extra_chapters=self.cfg.extra_chapters,
+            is_ranobelib=self.cfg.is_ranobelib,
+            max_chapters=self.cfg.max_concurrent_chapters,
+            max_images=self.cfg.max_concurrent_images,
+        )
 
     def _print_summary(self, successful: int, total: int, failed: int) -> None:
-        # Выводит итоги загрузки.
-        print(f"\n{Colors.BOLD}{'═' * 50}{Colors.RESET}")
-        print(Colors.success(f"Завершено: {successful}/{total} глав"))
-        
-        if failed:
-            print(Colors.info(f"Ошибок: {failed} глав"))
-            
-        print(Colors.info(f"Директория вывода: {self.cfg.output_dir.absolute()}"))
-        print(f"{Colors.BOLD}{'═' * 50}{Colors.RESET}\n")
+        self.reporter.summary(
+            successful,
+            total,
+            failed,
+            self.cfg.output_dir,
+        )

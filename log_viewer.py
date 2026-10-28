@@ -9,7 +9,6 @@ SERVER_URL = "http://127.0.0.1:8080/logs"
 
 
 def print_header() -> None:
-    # Выводит заголовок просмотрщика логов.
     print("=" * 60)
     print("MangaLib Server - Real-time Log Viewer")
     print("Press Ctrl+C to close")
@@ -19,7 +18,6 @@ def print_header() -> None:
 
 
 async def run_log_viewer() -> None:
-    # Запускает цикл просмотра логов.
     configure_utf8_console()
     print_header()
 
@@ -45,7 +43,6 @@ async def run_log_viewer() -> None:
 
 
 async def _process_logs(logs: list, last_logs: Set[str]) -> None:
-    # Обрабатывает и выводит новые логи.
     current_logs = set(logs)
     new_logs = [log for log in logs if log not in last_logs]
 
@@ -57,7 +54,6 @@ async def _process_logs(logs: list, last_logs: Set[str]) -> None:
 
 
 def main() -> None:
-    # Точка входа просмотрщика логов.
     try:
         asyncio.run(run_log_viewer())
     except KeyboardInterrupt:
